@@ -60,9 +60,10 @@ def call_llm(prompt: str, max_tokens: int = 500) -> str:
 # ----------------------------------------------------------------------
 # 2. Main processing function
 # ----------------------------------------------------------------------
-def process_comments(comments_dict: dict) -> dict:
+def process_comments(comments_dict: dict, facility_name: str = None, total_facilities: int = 1) -> dict:
     """
     Takes a dict of comment fields and returns a structured insight.
+    Includes facility context for more specific summaries.
     """
     if not comments_dict:
         return {"summary": "No comments provided.", "categories": [], "challenges": [], "mitigations": []}
@@ -72,19 +73,17 @@ def process_comments(comments_dict: dict) -> dict:
     if not full_text.strip():
         return {"summary": "No meaningful comments.", "categories": [], "challenges": [], "mitigations": []}
 
-    # Skip API key check when using Ollama (local)
-    if settings.PROVIDER != "openai" and not settings.OPENAI_API_KEY:
-        logging.warning("No OPENAI_API_KEY set. Skipping LLM processing.")
-        return {
-            "summary": "OpenAI API key not set. Please set OPENAI_API_KEY to enable insights.",
-            "categories": [],
-            "challenges": [],
-            "mitigations": []
-        }
+    # Build context for the LLM
+    context = ""
+    if facility_name:
+        context = f"These comments are from the following facility: {facility_name}.\n"
+    if total_facilities > 1:
+        context = f"These comments are aggregated from {total_facilities} facilities. "
 
     prompt = f"""
-        You are an expert in HIV programme transition analysis. Given the following comments from a facility visit, produce a JSON output with:
-        1. "summary": a concise 2-3 sentence summary of the main points.
+        {context}
+        You are an expert in HIV programme transition analysis. Given the following comments from facility visits, produce a JSON output with:
+        1. "summary": a concise 2-3 sentence summary of the main points. Be specific and mention the facility name(s) if provided.
         2. "categories": a list of major themes (e.g., Staffing, Supply Chain, Community Engagement, Logistics, Training, Infrastructure).
         3. "challenges": a list of specific challenges mentioned.
         4. "mitigations": a list of mitigation strategies or recommendations.
@@ -96,25 +95,12 @@ def process_comments(comments_dict: dict) -> dict:
         """
     try:
         response_text = call_llm(prompt)
-        
-        # Clean up potential markdown wrappers
+        # Clean up potential markdown wrappers...
         if "```json" in response_text:
             response_text = response_text.split("```json")[1].split("```")[0].strip()
         elif "```" in response_text:
             response_text = response_text.split("```")[1].split("```")[0].strip()
-            
-        # Attempt to parse JSON
-        try:
-            result = json.loads(response_text)
-        except json.JSONDecodeError as e:
-            logging.warning(f"JSON decode error: {e}\nResponse text: {response_text[:200]}...")
-            # Fallback: store raw text as summary
-            return {
-                "summary": f"Raw response (parsing failed): {response_text[:200]}...",
-                "categories": [],
-                "challenges": [],
-                "mitigations": []
-            }
+        result = json.loads(response_text)
         return {
             "summary": result.get("summary", ""),
             "categories": result.get("categories", []),
