@@ -36,7 +36,7 @@ def call_llm_old_version(prompt: str, max_tokens: int = 500) -> str:
             "stream": False
         }
         try:
-            # ⬆️ Increased timeout to 300 seconds
+            # Increased timeout to 300 seconds
             response = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=300)
             response.raise_for_status()
             data = response.json()
@@ -83,6 +83,7 @@ def call_llm(prompt: str, max_tokens: int = 500) -> str:
             "stream": False
         }
         try:
+            # Increased timeout to 300 seconds
             response = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=300)
             response.raise_for_status()
             data = response.json()
@@ -123,17 +124,27 @@ def process_comments(comments_dict: dict, facility_name: str = None, total_facil
         context = f"These comments are aggregated from {total_facilities} facilities. "
 
     prompt = f"""
-        {context}
-        You are an expert in HIV programme transition analysis. Given the following comments from facility visits, produce a JSON output with:
-        1. "summary": a concise 2-3 sentence summary of the main points. Be specific and mention the facility name(s) if provided.
-        2. "categories": a list of major themes (e.g., Staffing, Supply Chain, Community Engagement, Logistics, Training, Infrastructure).
-        3. "challenges": a list of specific challenges mentioned.
-        4. "mitigations": a list of mitigation strategies or recommendations.
+You are an expert in HIV programme transition and accountability. 
+The ACCE project is transitioning from donor-funded project to MOHCC ownership in Zimbabwe.
 
-        Comments:
-        {full_text}
+**Context**: 
+- This facility is being assessed for transition readiness.
+- The goal is to ensure continuity of HIV services post-project.
+- Accountability to the donor and MOHCC is critical.
 
-        Return only valid JSON, no extra text.
+**Facility**: {facility_name or "Aggregated facilities"}
+
+**Comments**:
+{full_text}
+
+Based on the comments above, produce a JSON output with:
+1. "summary": a concise 2-3 sentence summary focused on **transition readiness**. Mention any gaps that could affect service continuity.
+2. "categories": list of themes (e.g., Staffing, Supply Chain, Community Engagement, Logistics, Training, Infrastructure, **Transition Preparedness**).
+3. "challenges": list of specific challenges that could **delay or derail the transition**.
+4. "mitigations": list of mitigation strategies or recommendations to **accelerate transition readiness**.
+5. "accountability_gaps": list of any accountability gaps (e.g., no clear focal person, no documented handover plan, missing sustainability plans).
+
+Return only valid JSON, no extra text.
         """
     try:
         response_text = call_llm(prompt)

@@ -8,8 +8,67 @@ import json
 import logging
 from app.utils import safe_json_loads
 
-
 router = APIRouter(prefix="/api/categorical", tags=["categorical"])
+
+# ----------------------------------------------------------------------
+# Helper: Generate a fallback summary from governance indicator counts
+# ----------------------------------------------------------------------
+def _generate_fallback_summary(reports: list) -> dict:
+    """Generate a structured summary from governance indicator counts."""
+    if not reports:
+        return {
+            "summary": "No governance data available.",
+            "strengths": [],
+            "challenges": [],
+            "recommendations": []
+        }
+
+    total = len(reports)
+    focal_person = sum(1 for r in reports if r.raw_data and r.raw_data.get("Sustainability Transition Focal Person in place?") in ["Yes", "yes", "true"])
+    hcc_func = sum(1 for r in reports if r.raw_data and r.raw_data.get("Availability and functionality of Health Centre Committee") in ["Yes", "yes", "true"])
+    sust_plan = sum(1 for r in reports if r.raw_data and r.raw_data.get("Availability of facility sustainability plan?") in ["Yes", "yes", "true"])
+    hcc_meeting = sum(1 for r in reports if r.raw_data and r.raw_data.get("Was the HCC/Health facility meeting done") in ["Yes", "yes", "true"])
+
+    summary = (
+        f"Among {total} facilities, {focal_person} have a Sustainability Transition Focal Person, "
+        f"{hcc_func} have a functional HCC, {sust_plan} have a sustainability plan, "
+        f"and {hcc_meeting} have held an HCC meeting."
+    )
+
+    strengths = [
+        f"{focal_person} facilities have a focal person in place",
+        f"{hcc_func} facilities have a functional HCC",
+        f"{sust_plan} facilities have a sustainability plan",
+        f"{hcc_meeting} facilities have held an HCC meeting"
+    ]
+
+    challenges = []
+    if total - focal_person > 0:
+        challenges.append(f"{total - focal_person} facilities lack a focal person")
+    if total - hcc_func > 0:
+        challenges.append(f"{total - hcc_func} facilities lack a functional HCC")
+    if total - sust_plan > 0:
+        challenges.append(f"{total - sust_plan} facilities lack a sustainability plan")
+    if total - hcc_meeting > 0:
+        challenges.append(f"{total - hcc_meeting} facilities have not held an HCC meeting")
+
+    recommendations = []
+    if total - focal_person > 0:
+        recommendations.append("Ensure all facilities have a designated Sustainability Transition Focal Person.")
+    if total - hcc_func > 0:
+        recommendations.append("Revitalise HCCs and ensure regular meetings are held.")
+    if total - sust_plan > 0:
+        recommendations.append("Develop and implement sustainability plans at all facilities.")
+    if total - hcc_meeting > 0:
+        recommendations.append("Track and document all HCC meetings to ensure accountability.")
+
+    return {
+        "summary": summary,
+        "strengths": strengths,
+        "challenges": challenges,
+        "recommendations": recommendations
+    }
+
 
 # ----------------------------------------------------------------------
 # 1. Categorical summary (counts of Yes/No/Unknown)
@@ -107,7 +166,7 @@ def get_categorical_summary(
 
 
 # ----------------------------------------------------------------------
-# 2. LLM‑generated governance insights (with comment limit)
+# 2. LLM‑generated governance insights (with fallback)
 # ----------------------------------------------------------------------
 @router.get("/insights")
 def get_governance_insights(
@@ -136,7 +195,7 @@ def get_governance_insights(
         ("Was the HCC/Health facility meeting done", "Comments.3")
     ]
     
-    # Build structured text – limit to 30 comments
+    # Build structured text – limit to 20 comments
     comment_blocks = []
     MAX_COMMENTS = 20
     count = 0
@@ -160,57 +219,62 @@ def get_governance_insights(
                 if count >= MAX_COMMENTS:
                     break
     
-    if not comment_blocks:
-        return {
-            "total_facilities": len(reports),
-            "summary": "No governance comments available for the selected filters.",
-            "strengths": [],
-            "challenges": [],
-            "recommendations": []
-        }
+    # If there are comments, try LLM; otherwise use fallback
+    if comment_blocks:
+        combined_text = "\n".join(comment_blocks)
+        prompt = f"""
+You are an expert in HIV programme transition and accountability. 
+The ACCE project is transitioning to MOHCC ownership in Zimbabwe.
 
-    combined_text = "\n".join(comment_blocks)
-    
-    prompt = f"""
-You are an expert in HIV programme transition analysis. 
-Based on the following governance and coordination comments from **{len(reports)}** facility visits, produce a structured summary.
+**Context**:
+- {len(reports)} facilities are being assessed for transition readiness.
+- Each facility should have a Sustainability Transition Focal Person, a functional HCC, a sustainability plan, and regular HCC meetings.
+- Accountability to the donor and MOHCC requires evidence of transition progress.
 
-Your output must be a valid JSON object with these keys:
-- "summary": a concise overall summary (2-3 sentences) mentioning that this is based on **{len(reports)}** facilities.
-- "strengths": a list of specific strengths (positive findings) observed.
-- "challenges": a list of specific challenges or gaps identified.
-- "recommendations": a list of actionable recommendations.
-
-Comments:
+**Governance Comments**:
 {combined_text}
+
+Based on these comments, produce a JSON output with:
+1. "summary": a concise summary (2-3 sentences) stating **how many facilities are transition-ready** versus those needing attention. Mention specific districts or facilities if patterns emerge.
+2. "strengths": list of governance strengths that support a smooth transition.
+3. "challenges": list of governance gaps that **pose a risk to the transition**.
+4. "recommendations": actionable steps to **strengthen governance and accountability** before project end.
 
 Return only valid JSON, no extra text.
 """
-    try:
-        response_text = call_llm(prompt, max_tokens=500)
-        # Clean up markdown if present
-        if "```json" in response_text:
-            response_text = response_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in response_text:
-            response_text = response_text.split("```")[1].split("```")[0].strip()
-        #result = json.loads(response_text)
-        result = safe_json_loads(response_text)
-    except Exception as e:
-        logging.error(f"Governance insights LLM failed: {e}")
-          # Fallback: extract a short summary from the first few comments
-        fallback_summary = f"Unable to generate structured insights. Raw response (first 200 chars): {response_text[:200]}..."
-        result = {
-            # "summary": f"Unable to generate insights at this time. Error: {str(e)}",
-            "summary": fallback_summary,
-            "strengths": [],
-            "challenges": [],
-            "recommendations": []
+        try:
+            response_text = call_llm(prompt, max_tokens=500)
+            # Clean up markdown if present
+            if "```json" in response_text:
+                response_text = response_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in response_text:
+                response_text = response_text.split("```")[1].split("```")[0].strip()
+            result = safe_json_loads(response_text)
+            return {
+                "total_facilities": len(reports),
+                "summary": result.get("summary", ""),
+                "strengths": result.get("strengths", []),
+                "challenges": result.get("challenges", []),
+                "recommendations": result.get("recommendations", [])
+            }
+        except Exception as e:
+            logging.error(f"Governance insights LLM failed: {e}")
+            # Fallback to rule-based summary
+            fallback = _generate_fallback_summary(reports)
+            return {
+                "total_facilities": len(reports),
+                "summary": fallback["summary"],
+                "strengths": fallback["strengths"],
+                "challenges": fallback["challenges"],
+                "recommendations": fallback["recommendations"]
+            }
+    else:
+        # No comments – use rule-based fallback
+        fallback = _generate_fallback_summary(reports)
+        return {
+            "total_facilities": len(reports),
+            "summary": fallback["summary"],
+            "strengths": fallback["strengths"],
+            "challenges": fallback["challenges"],
+            "recommendations": fallback["recommendations"]
         }
-
-    return {
-        "total_facilities": len(reports),
-        "summary": result.get("summary", ""),
-        "strengths": result.get("strengths", []),
-        "challenges": result.get("challenges", []),
-        "recommendations": result.get("recommendations", [])
-    }

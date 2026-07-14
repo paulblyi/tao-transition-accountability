@@ -27,3 +27,9 @@ export const getCategoricalSummary = (filters: any) =>
 
 export const getReportSections = (filters: any) =>
   api.get('/report/sections', { params: filters });
+
+export const getCoverage = (filters: any) =>
+  api.get('/coverage/district', { params: filters });
+
+export const getTransitionRisk = (filters: any) =>
+  api.get('/coverage/risk', { params: filters });

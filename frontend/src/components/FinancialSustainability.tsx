@@ -6,7 +6,7 @@ const FinancialSustainability: React.FC<{ data: any[]; summary: any }> = ({ data
 
   return (
     <Paper sx={{ p: 2, mb: 2 }}>
-      <Typography variant="h6" gutterBottom>5. Financial Sustainability & Resource Mobilization</Typography>
+      <Typography variant="h6" gutterBottom>Financial Sustainability & Resource Mobilization</Typography>
       
       <TableContainer>
         <Table size="small">

@@ -15,6 +15,7 @@ import CategoricalSummary from './CategoricalSummary';
 import ReportSections from './ReportSections';
 import DistrictComparison from './DistrictComparison';
 import FacilityScorecard from './FacilityScorecard';
+import TransitionDashboard from './TransitionDashboard';
 
 type AggregatedInsight = Insight & {
   facilities?: string;
@@ -131,7 +132,12 @@ const Dashboard: React.FC = () => {
           <GovernanceInsights filters={appliedFilters} />
         </Grid>
 
-        {/* Rows 4-6: Left column (1/3) with three charts, Right column (2/3) with Qualitative Insights spanning all three */}
+        {/* Row 4: Transition Dashboard */}
+        <Grid item xs={12}>
+          <TransitionDashboard filters={appliedFilters} />
+        </Grid>
+
+        {/* Rows 5-7: Left column (1/3) with three charts, Right column (2/3) with Qualitative Insights spanning all three */}
         <Grid item xs={12}>
           <Grid container spacing={3}>
             <Grid item xs={12} md={4}>
@@ -161,12 +167,12 @@ const Dashboard: React.FC = () => {
           </Grid>
         </Grid>
 
-        {/* Row 7: Report Sections */}
+        {/* Row 8: Report Sections */}
         <Grid item xs={12}>
           <ReportSections filters={appliedFilters} />
         </Grid>
 
-        {/* Row 8: Trend Chart – now sorted by date */}
+        {/* Row 9: Trend Chart – now sorted by date */}
         <Grid item xs={12}>
           <TrendChart
             data={trendData}
@@ -180,7 +186,7 @@ const Dashboard: React.FC = () => {
           />
         </Grid>
 
-        {/* Row 9: Data Table */}
+        {/* Row 10: Data Table */}
         <Grid item xs={12}>
           <DataTable data={tableData.slice(0, 20)} title="Facility Data (Top 20)" />
         </Grid>

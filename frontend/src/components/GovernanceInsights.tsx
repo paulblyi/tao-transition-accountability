@@ -36,7 +36,16 @@ const GovernanceInsights: React.FC<GovernanceInsightsProps> = ({ filters }) => {
       setError(null);
       try {
         const response = await getGovernanceInsights(filters);
-        setData(response.data);
+        const rawData = response.data;
+        // Ensure arrays exist even if missing
+        const safeData: InsightsData = {
+          total_facilities: rawData?.total_facilities || 0,
+          summary: rawData?.summary || 'No summary available.',
+          strengths: Array.isArray(rawData?.strengths) ? rawData.strengths : [],
+          challenges: Array.isArray(rawData?.challenges) ? rawData.challenges : [],
+          recommendations: Array.isArray(rawData?.recommendations) ? rawData.recommendations : [],
+        };
+        setData(safeData);
       } catch (err: any) {
         setError(err.message || 'Failed to load governance insights');
         console.error('Governance insights error:', err);
@@ -78,6 +87,9 @@ const GovernanceInsights: React.FC<GovernanceInsightsProps> = ({ filters }) => {
     );
   }
 
+  // Safely use arrays (already ensured above)
+  const { summary, strengths, challenges, recommendations } = data;
+
   return (
     <Paper sx={{ p: 2 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
@@ -93,18 +105,18 @@ const GovernanceInsights: React.FC<GovernanceInsightsProps> = ({ filters }) => {
       </Box>
 
       <Typography variant="body1" paragraph sx={{ fontStyle: 'italic', bgcolor: '#f5f5f5', p: 2, borderRadius: 1 }}>
-        {data.summary}
+        {summary}
       </Typography>
 
       <Divider sx={{ my: 2 }} />
 
-      {data.strengths && data.strengths.length > 0 && (
+      {strengths.length > 0 && (
         <>
           <Typography variant="subtitle2" color="success.main" gutterBottom>
             ✅ Strengths
           </Typography>
           <List dense disablePadding>
-            {data.strengths.map((item, idx) => (
+            {strengths.map((item, idx) => (
               <ListItem key={idx} disableGutters>
                 <ListItemText primary={`• ${item}`} />
               </ListItem>
@@ -113,13 +125,13 @@ const GovernanceInsights: React.FC<GovernanceInsightsProps> = ({ filters }) => {
         </>
       )}
 
-      {data.challenges && data.challenges.length > 0 && (
+      {challenges.length > 0 && (
         <>
           <Typography variant="subtitle2" color="error.main" gutterBottom sx={{ mt: 2 }}>
             ⚠️ Challenges
           </Typography>
           <List dense disablePadding>
-            {data.challenges.map((item, idx) => (
+            {challenges.map((item, idx) => (
               <ListItem key={idx} disableGutters>
                 <ListItemText primary={`• ${item}`} />
               </ListItem>
@@ -128,13 +140,13 @@ const GovernanceInsights: React.FC<GovernanceInsightsProps> = ({ filters }) => {
         </>
       )}
 
-      {data.recommendations && data.recommendations.length > 0 && (
+      {recommendations.length > 0 && (
         <>
           <Typography variant="subtitle2" color="primary.main" gutterBottom sx={{ mt: 2 }}>
             💡 Recommendations
           </Typography>
           <List dense disablePadding>
-            {data.recommendations.map((item, idx) => (
+            {recommendations.map((item, idx) => (
               <ListItem key={idx} disableGutters>
                 <ListItemText primary={`• ${item}`} />
               </ListItem>

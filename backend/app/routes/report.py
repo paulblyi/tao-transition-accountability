@@ -14,7 +14,6 @@ router = APIRouter(prefix="/api/report", tags=["report"])
 # Helper: JSON repair and safe loading
 # ----------------------------------------------------------------------
 def _repair_json(raw: str) -> str:
-    """Remove markdown fences, extract first balanced JSON object."""
     raw = re.sub(r'```json\s*', '', raw)
     raw = re.sub(r'```\s*', '', raw)
     start = raw.find('{')
@@ -33,13 +32,11 @@ def _repair_json(raw: str) -> str:
     if braces != 0:
         raise ValueError("Unbalanced braces")
     json_str = raw[start:end]
-    # Remove trailing commas
     json_str = re.sub(r',\s*}', '}', json_str)
     json_str = re.sub(r',\s*]', ']', json_str)
     return json_str
 
 def _safe_json_loads(raw: str) -> dict:
-    """Try to parse JSON; on failure, raise with the raw text."""
     try:
         repaired = _repair_json(raw)
         return json.loads(repaired)
@@ -51,6 +48,71 @@ def _safe_json_loads(raw: str) -> dict:
 # ----------------------------------------------------------------------
 def _limit_comments(data_list, max_items=20):
     return data_list[:max_items]
+
+# ----------------------------------------------------------------------
+# Rule-based fallback summaries
+# ----------------------------------------------------------------------
+def generate_capacity_summary(data: list) -> dict:
+    if not data:
+        return {"summary": "No capacity building data available."}
+    
+    total = len(data)
+    with_gaps = sum(1 for c in data if c.get('gaps_supported') is not None)
+    with_testers = sum(1 for c in data if c.get('nurse_testers') is not None)
+    with_viac = sum(1 for c in data if c.get('viac_trained') is not None)
+    with_vl = sum(1 for c in data if c.get('vl_mentored') is not None)
+    with_ahd = sum(1 for c in data if c.get('ahd_supported') is not None)
+    with_oi_focal = sum(1 for c in data if c.get('oi_focal') == "Yes")
+    
+    summary = (
+        f"Across {total} facilities, {with_gaps} reported capacity gaps. "
+        f"{with_testers} facilities have nurse testers, {with_viac} have VIAC-trained staff, "
+        f"{with_vl} have VL mentorship, {with_ahd} have AHD support, "
+        f"and {with_oi_focal} have an OI focal person in place."
+    )
+    return {"summary": summary}
+
+def generate_financial_summary(data: list) -> dict:
+    if not data:
+        return {"summary": "No financial sustainability data available."}
+    
+    total = len(data)
+    has_histology = sum(1 for f in data if f.get('histology') == "Yes")
+    has_airtime = sum(1 for f in data if f.get('airtime') == "Yes")
+    has_fuel = sum(1 for f in data if f.get('fuel') == "Yes")
+    has_stationery = sum(1 for f in data if f.get('stationery') == "Yes")
+    has_cats = sum(1 for f in data if f.get('cats_stipends') == "Yes")
+    
+    summary = (
+        f"Of {total} facilities, {has_histology} have histology coupons, "
+        f"{has_airtime} have facility airtime, {has_fuel} have fuel for outreach, "
+        f"{has_stationery} have stationery for VHCWs, and {has_cats} receive CATS stipends from NAC."
+    )
+    return {"summary": summary}
+
+def generate_challenges_summary(data: list) -> dict:
+    if not data:
+        return {"summary": "No challenges data available."}
+    
+    total = len(data)
+    challenges_mentioned = sum(1 for c in data if c.get('challenges') is not None)
+    mitigations_mentioned = sum(1 for c in data if c.get('mitigations') is not None)
+    
+    summary = (
+        f"Across {total} facilities, {challenges_mentioned} reported challenges, "
+        f"and {mitigations_mentioned} have documented mitigation strategies."
+    )
+    return {"summary": summary}
+
+def generate_plans_summary(data: list) -> dict:
+    if not data:
+        return {"summary": "No plans data available."}
+    
+    total = len(data)
+    has_plan = sum(1 for p in data if p.get('plan') is not None)
+    
+    summary = f"Of {total} facilities, {has_plan} have documented plans for next week."
+    return {"summary": summary}
 
 # ----------------------------------------------------------------------
 # Main endpoint
@@ -135,7 +197,7 @@ def get_report_sections(
             })
 
     # --------------------------------------------------------------
-    # LLM Summaries (limit to 20 facilities per prompt)
+    # LLM Summaries with rule-based fallbacks
     # --------------------------------------------------------------
     summaries = {}
 
@@ -166,11 +228,9 @@ Return only valid JSON.
                 summaries["capacity"] = _safe_json_loads(resp)
             except Exception as e:
                 logging.error(f"Capacity summary LLM failed: {e}")
-                summaries["capacity"] = {
-                    "summary": "Could not generate a summary for capacity building. Please review the table data."
-                }
+                summaries["capacity"] = generate_capacity_summary(cap_limited)
         else:
-            summaries["capacity"] = {"summary": "No capacity data available for the selected filters."}
+            summaries["capacity"] = generate_capacity_summary(cap_limited)
     else:
         summaries["capacity"] = {"summary": "No capacity data available."}
 
@@ -199,11 +259,9 @@ Return only valid JSON.
                 summaries["financial"] = _safe_json_loads(resp)
             except Exception as e:
                 logging.error(f"Financial summary LLM failed: {e}")
-                summaries["financial"] = {
-                    "summary": "Could not generate a summary for financial sustainability. Please review the table data."
-                }
+                summaries["financial"] = generate_financial_summary(fin_limited)
         else:
-            summaries["financial"] = {"summary": "No financial data available for the selected filters."}
+            summaries["financial"] = generate_financial_summary(fin_limited)
     else:
         summaries["financial"] = {"summary": "No financial data available."}
 
@@ -231,11 +289,9 @@ Return only valid JSON.
                 summaries["challenges"] = _safe_json_loads(resp)
             except Exception as e:
                 logging.error(f"Challenges summary LLM failed: {e}")
-                summaries["challenges"] = {
-                    "summary": "Could not generate a summary for challenges. Please review the table data."
-                }
+                summaries["challenges"] = generate_challenges_summary(chal_limited)
         else:
-            summaries["challenges"] = {"summary": "No challenges data available for the selected filters."}
+            summaries["challenges"] = generate_challenges_summary(chal_limited)
     else:
         summaries["challenges"] = {"summary": "No challenges data available."}
 
@@ -259,11 +315,9 @@ Return only valid JSON.
                 summaries["plans"] = _safe_json_loads(resp)
             except Exception as e:
                 logging.error(f"Plans summary LLM failed: {e}")
-                summaries["plans"] = {
-                    "summary": "Could not generate a summary for plans. Please review the table data."
-                }
+                summaries["plans"] = generate_plans_summary(plan_limited)
         else:
-            summaries["plans"] = {"summary": "No plans data available for the selected filters."}
+            summaries["plans"] = generate_plans_summary(plan_limited)
     else:
         summaries["plans"] = {"summary": "No plans data available."}
 

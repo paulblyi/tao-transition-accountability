@@ -10,8 +10,8 @@ interface Props {
 const Filters: React.FC<Props> = ({ onFilterChange }) => {
   const [provinces, setProvinces] = useState<string[]>([]);
   const [districts, setDistricts] = useState<string[]>([]);
-  const [selectedProvince, setSelectedProvince] = useState('');
-  const [selectedDistrict, setSelectedDistrict] = useState('');
+  const [selectedProvince, setSelectedProvince] = useState<string>('all');
+  const [selectedDistrict, setSelectedDistrict] = useState<string>('all');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
@@ -20,18 +20,18 @@ const Filters: React.FC<Props> = ({ onFilterChange }) => {
   }, []);
 
   useEffect(() => {
-    if (selectedProvince) {
+    if (selectedProvince && selectedProvince !== 'all') {
       getDistricts(selectedProvince).then(res => setDistricts(res.data));
     } else {
       getDistricts().then(res => setDistricts(res.data));
     }
-    setSelectedDistrict('');
+    setSelectedDistrict('all'); // reset district when province changes
   }, [selectedProvince]);
 
   const handleApply = () => {
     onFilterChange({
-      province: selectedProvince || undefined,
-      district: selectedDistrict || undefined,
+      province: selectedProvince === 'all' ? undefined : selectedProvince,
+      district: selectedDistrict === 'all' ? undefined : selectedDistrict,
       start_date: startDate || undefined,
       end_date: endDate || undefined,
     });
@@ -49,7 +49,7 @@ const Filters: React.FC<Props> = ({ onFilterChange }) => {
               label="Province"
               onChange={(e) => setSelectedProvince(e.target.value)}
             >
-              <MenuItem value="">All</MenuItem>
+              <MenuItem value="all">All</MenuItem>
               {provinces.map(p => <MenuItem key={p} value={p}>{p}</MenuItem>)}
             </Select>
           </FormControl>
@@ -63,7 +63,7 @@ const Filters: React.FC<Props> = ({ onFilterChange }) => {
               label="District"
               onChange={(e) => setSelectedDistrict(e.target.value)}
             >
-              <MenuItem value="">All</MenuItem>
+              <MenuItem value="all">All</MenuItem>
               {districts.map(d => <MenuItem key={d} value={d}>{d}</MenuItem>)}
             </Select>
           </FormControl>
