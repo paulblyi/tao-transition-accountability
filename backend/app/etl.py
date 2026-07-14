@@ -119,7 +119,8 @@ def load_excel(file_path: str):
     db: Session = SessionLocal()
     total_records = len(df)
     processed_count = 0
-
+    total_time = 0
+    
     for idx, row in df.iterrows():
         # Find existing record by _uuid, or create new
         existing = db.query(FacilityReport).filter_by(_uuid=row['_uuid']).first()
@@ -142,17 +143,21 @@ def load_excel(file_path: str):
 
         # Set the JSON raw data
         report.raw_data = row['raw_data']
-
+        
         # ---- LLM processing ----
         if not report.insights:  # Only process if not already done
             # Extract comment fields from raw_data (keys with 'Comment' or 'Comments')
             comments_dict = {k: v for k, v in row['raw_data'].items() if 'Comment' in k or 'Comments' in k}
             if comments_dict:
+                start = time.perf_counter()
                 # Show progress before processing
                 print(f"🔄 Processing record {idx+1}/{total_records} - {row['facility']}...")
                 report.insights = process_comments(comments_dict)
                 # time.sleep(12)  # 12 seconds between requests to respect 5/min limit (optional)
                 processed_count += 1
+                duration = time.perf_counter() - start
+                print(f"✅ Record processing of: {idx+1} completed with {duration:.4f}s!")
+                total_time += duration
             else:
                 # If no comments, store a default
                 report.insights = {"summary": "No comments to analyse.", "categories": [], "challenges": [], "mitigations": []}
@@ -163,6 +168,7 @@ def load_excel(file_path: str):
     db.commit()
     db.close()
     print(f"✅ ETL completed successfully. Processed {processed_count} records with LLM insights.")
+    print(f"✅ Total time spent on LLM processing: {total_time:.2f} seconds")
     print(f"✅ Total records in Excel: {total_records}")
 
 if __name__ == "__main__":

@@ -17,7 +17,9 @@ const Filters: React.FC<Props> = ({ onFilterChange }) => {
 
   // Load provinces on mount
   useEffect(() => {
-    getProvinces().then(res => setProvinces(res.data));
+    if (provinces.length === 0) { // For province and district lists, cache them in the frontend
+      getProvinces().then(res => setProvinces(res.data));
+    }
   }, []);
 
   // Load districts when province changes

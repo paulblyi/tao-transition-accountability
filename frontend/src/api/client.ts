@@ -18,3 +18,9 @@ export const getProvinces = () =>
 
 export const getDistricts = (province?: string) => 
   api.get('/filters/districts', { params: { province } });
+
+export const getGovernanceInsights = (filters: any) =>
+  api.get('/categorical/insights', { params: filters });
+
+export const getCategoricalSummary = (filters: any) =>
+  api.get('/categorical/summary', { params: filters });

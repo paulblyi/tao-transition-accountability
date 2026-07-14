@@ -4,7 +4,6 @@ from typing import Optional
 from app.database import get_db
 from app import crud
 from app.llm_processor import process_comments
-import json
 
 router = APIRouter(prefix="/api/insights", tags=["insights"])
 
@@ -22,6 +21,7 @@ def get_insights(
     insights = [r.insights for r in reports if r.insights]
     
     # Generate aggregated summary if there are reports
+    aggregated = None
     if reports and len(reports) > 0:
         # Extract facility names
         facility_names = [r.facility for r in reports if r.facility]
@@ -36,28 +36,34 @@ def get_insights(
                             combined_comments[k] = []
                         combined_comments[k].append(f"[{report.facility}] {v}")
         
-        # Convert lists to strings
-        combined_comments_str = {k: "\n".join(v[:3]) for k, v in combined_comments.items() if v}
+        # Convert lists to strings (take first 3 per category to avoid oversized prompts)
+        combined_comments_str = {}
+        for k, v in combined_comments.items():
+            if v:
+                combined_comments_str[k] = "\n".join(v[:3])
+                if len(v) > 3:
+                    combined_comments_str[k] += f"\n... and {len(v)-3} more comments"
         
         # Generate an aggregated summary
-        aggregated_insight = process_comments(
-            combined_comments_str,
-            facility_name=None,
-            total_facilities=len(reports)
-        )
-        
-        # Add facility list to the summary
-        if facility_names:
-            facility_list = ", ".join(facility_names[:5])
-            if len(facility_names) > 5:
-                facility_list += f" and {len(facility_names) - 5} others"
-            aggregated_insight['facilities'] = facility_list
-            aggregated_insight['total_facilities'] = len(facility_names)
-            aggregated_insight['summary'] = f"Based on {len(facility_names)} facilities including {facility_list}. " + aggregated_insight.get('summary', '')
+        if combined_comments_str:
+            aggregated_insight = process_comments(
+                combined_comments_str,
+                facility_name=None,
+                total_facilities=len(reports)
+            )
+            # Add facility list to the summary
+            if facility_names:
+                facility_list = ", ".join(facility_names[:5])
+                if len(facility_names) > 5:
+                    facility_list += f" and {len(facility_names) - 5} others"
+                aggregated_insight['facilities'] = facility_list
+                aggregated_insight['total_facilities'] = len(facility_names)
+                aggregated_insight['summary'] = f"Based on {len(facility_names)} facilities including {facility_list}. " + aggregated_insight.get('summary', '')
+            aggregated = aggregated_insight
     
     return {
         "insights": insights,
-        "aggregated": aggregated_insight if reports else None,
+        "aggregated": aggregated,
         "total_facilities": len(reports),
         "facility_names": [r.facility for r in reports if r.facility]
     }

@@ -32,7 +32,7 @@ const QualitativeInsights: React.FC<Props> = ({ insights, aggregated, totalFacil
   return (
     <div>
       <Typography variant="h6" gutterBottom>
-        AI-Generated Insights
+        Generated Insights
       </Typography>
 
       {aggregated && (
@@ -52,7 +52,8 @@ const QualitativeInsights: React.FC<Props> = ({ insights, aggregated, totalFacil
           <Typography variant="subtitle2" color="textSecondary" gutterBottom>
             Top Themes:
           </Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+          {/* <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}> */}
+          <Box sx={{ maxHeight: '500px', overflowY: 'auto' }}>
             {topCategories.map(([cat, count]) => (
               <Chip key={cat} label={`${cat} (${count})`} size="small" />
             ))}

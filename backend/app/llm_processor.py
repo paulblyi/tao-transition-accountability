@@ -4,6 +4,9 @@ import logging
 from app.config import settings
 import requests
 
+# Make call_llm available for other modules
+__all__ = ['call_llm', 'process_comments']
+
 # ----------------------------------------------------------------------
 # Provider setup
 # ----------------------------------------------------------------------
@@ -95,12 +98,22 @@ def process_comments(comments_dict: dict, facility_name: str = None, total_facil
         """
     try:
         response_text = call_llm(prompt)
-        # Clean up potential markdown wrappers...
-        if "```json" in response_text:
-            response_text = response_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in response_text:
-            response_text = response_text.split("```")[1].split("```")[0].strip()
-        result = json.loads(response_text)
+
+        # Remove markdown wrappers
+        import re
+        response_text = re.sub(r'```json\s*', '', response_text)
+        response_text = re.sub(r'```\s*', '', response_text)
+        
+        # Extract the JSON object by finding the first '{' and last '}'
+        start = response_text.find('{')
+        end = response_text.rfind('}')
+        if start != -1 and end != -1 and end > start:
+            json_str = response_text[start:end+1]
+        else:
+            raise ValueError("No valid JSON object found in response")
+        
+        result = json.loads(json_str)
+        
         return {
             "summary": result.get("summary", ""),
             "categories": result.get("categories", []),
