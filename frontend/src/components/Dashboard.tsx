@@ -13,6 +13,8 @@ import Header from './Header';
 import GovernanceInsights from './GovernanceInsights';
 import CategoricalSummary from './CategoricalSummary';
 import ReportSections from './ReportSections';
+import DistrictComparison from './DistrictComparison';
+import FacilityScorecard from './FacilityScorecard';
 
 type AggregatedInsight = Insight & {
   facilities?: string;
@@ -37,7 +39,6 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     if (!filtersApplied) return;
-
     const fetchData = async () => {
       setLoading(true);
       try {
@@ -59,7 +60,7 @@ const Dashboard: React.FC = () => {
     fetchData();
   }, [appliedFilters, filtersApplied]);
 
-  // Prepare trend data
+  // Prepare trend data – group by week
   const trendData = tableData.reduce((acc: any[], row: any) => {
     const week = row.week_ending?.split('T')[0] || 'Unknown';
     const existing = acc.find((d: any) => d.week === week);
@@ -75,7 +76,9 @@ const Dashboard: React.FC = () => {
     return acc;
   }, []);
 
-  // ----------------------- Render -----------------------
+  // SORT BY DATE (oldest to newest)
+  trendData.sort((a, b) => new Date(a.week).getTime() - new Date(b.week).getTime());
+
   const renderContent = () => {
     if (!filtersApplied) {
       return (
@@ -98,7 +101,6 @@ const Dashboard: React.FC = () => {
       );
     }
 
-    // If no data after applying filters
     if (!aggregated || aggregated.total_facilities === 0) {
       return (
         <Box sx={{ textAlign: 'center', my: 10 }}>
@@ -114,32 +116,57 @@ const Dashboard: React.FC = () => {
 
     return (
       <Grid container spacing={3}>
+        {/* Row 1: Summary Cards */}
         <Grid item xs={12}>
           <SummaryCards data={aggregated} />
         </Grid>
+
+        {/* Row 2: Categorical Summary */}
         <Grid item xs={12}>
           <CategoricalSummary filters={appliedFilters} />
         </Grid>
+
+        {/* Row 3: Governance Insights */}
         <Grid item xs={12}>
           <GovernanceInsights filters={appliedFilters} />
         </Grid>
-        <Grid item xs={12} md={8}>
-          <Paper sx={{ p: 2 }}>
-            <QuantitativeCharts data={aggregated} />
-          </Paper>
+
+        {/* Rows 4-6: Left column (1/3) with three charts, Right column (2/3) with Qualitative Insights spanning all three */}
+        <Grid item xs={12}>
+          <Grid container spacing={3}>
+            <Grid item xs={12} md={4}>
+              <Grid container direction="column" spacing={3}>
+                <Grid item>
+                  <Paper sx={{ p: 2 }}>
+                    <QuantitativeCharts data={aggregated} />
+                  </Paper>
+                </Grid>
+                <Grid item>
+                  <DistrictComparison data={tableData} />
+                </Grid>
+                <Grid item>
+                  <FacilityScorecard data={tableData} maxItems={6} />
+                </Grid>
+              </Grid>
+            </Grid>
+            <Grid item xs={12} md={8}>
+              <Paper sx={{ p: 2, height: '100%' }}>
+                <QualitativeInsights
+                  insights={insights}
+                  aggregated={aggregatedInsights}
+                  totalFacilities={aggregated?.total_facilities}
+                />
+              </Paper>
+            </Grid>
+          </Grid>
         </Grid>
-        <Grid item xs={12} md={4}>
-          <Paper sx={{ p: 2, height: '100%' }}>
-            <QualitativeInsights
-              insights={insights}
-              aggregated={aggregatedInsights}
-              totalFacilities={aggregated?.total_facilities}
-            />
-          </Paper>
-        </Grid>
+
+        {/* Row 7: Report Sections */}
         <Grid item xs={12}>
           <ReportSections filters={appliedFilters} />
         </Grid>
+
+        {/* Row 8: Trend Chart – now sorted by date */}
         <Grid item xs={12}>
           <TrendChart
             data={trendData}
@@ -152,6 +179,8 @@ const Dashboard: React.FC = () => {
             title="Weekly Performance Trends"
           />
         </Grid>
+
+        {/* Row 9: Data Table */}
         <Grid item xs={12}>
           <DataTable data={tableData.slice(0, 20)} title="Facility Data (Top 20)" />
         </Grid>

@@ -6,6 +6,8 @@ from app import crud
 from app.llm_processor import call_llm
 import json
 import logging
+from app.utils import safe_json_loads
+
 
 router = APIRouter(prefix="/api/categorical", tags=["categorical"])
 
@@ -136,7 +138,7 @@ def get_governance_insights(
     
     # Build structured text – limit to 30 comments
     comment_blocks = []
-    MAX_COMMENTS = 30
+    MAX_COMMENTS = 20
     count = 0
     for report in reports:
         if count >= MAX_COMMENTS:
@@ -171,10 +173,10 @@ def get_governance_insights(
     
     prompt = f"""
 You are an expert in HIV programme transition analysis. 
-Based on the following governance and coordination comments from facility visits, produce a structured summary.
+Based on the following governance and coordination comments from **{len(reports)}** facility visits, produce a structured summary.
 
 Your output must be a valid JSON object with these keys:
-- "summary": a concise overall summary (2-3 sentences) mentioning the number of facilities and any notable patterns.
+- "summary": a concise overall summary (2-3 sentences) mentioning that this is based on **{len(reports)}** facilities.
 - "strengths": a list of specific strengths (positive findings) observed.
 - "challenges": a list of specific challenges or gaps identified.
 - "recommendations": a list of actionable recommendations.
@@ -191,11 +193,15 @@ Return only valid JSON, no extra text.
             response_text = response_text.split("```json")[1].split("```")[0].strip()
         elif "```" in response_text:
             response_text = response_text.split("```")[1].split("```")[0].strip()
-        result = json.loads(response_text)
+        #result = json.loads(response_text)
+        result = safe_json_loads(response_text)
     except Exception as e:
         logging.error(f"Governance insights LLM failed: {e}")
+          # Fallback: extract a short summary from the first few comments
+        fallback_summary = f"Unable to generate structured insights. Raw response (first 200 chars): {response_text[:200]}..."
         result = {
-            "summary": f"Unable to generate insights at this time. Error: {str(e)}",
+            # "summary": f"Unable to generate insights at this time. Error: {str(e)}",
+            "summary": fallback_summary,
             "strengths": [],
             "challenges": [],
             "recommendations": []

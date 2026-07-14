@@ -6,13 +6,55 @@ from app import crud
 from app.llm_processor import call_llm
 import json
 import logging
+import re
 
 router = APIRouter(prefix="/api/report", tags=["report"])
 
-def _limit_comments(data_list, max_items=30):
-    """Return only the first `max_items` items from the list."""
+# ----------------------------------------------------------------------
+# Helper: JSON repair and safe loading
+# ----------------------------------------------------------------------
+def _repair_json(raw: str) -> str:
+    """Remove markdown fences, extract first balanced JSON object."""
+    raw = re.sub(r'```json\s*', '', raw)
+    raw = re.sub(r'```\s*', '', raw)
+    start = raw.find('{')
+    if start == -1:
+        raise ValueError("No JSON object found in response")
+    braces = 0
+    end = start
+    for i in range(start, len(raw)):
+        if raw[i] == '{':
+            braces += 1
+        elif raw[i] == '}':
+            braces -= 1
+            if braces == 0:
+                end = i + 1
+                break
+    if braces != 0:
+        raise ValueError("Unbalanced braces")
+    json_str = raw[start:end]
+    # Remove trailing commas
+    json_str = re.sub(r',\s*}', '}', json_str)
+    json_str = re.sub(r',\s*]', ']', json_str)
+    return json_str
+
+def _safe_json_loads(raw: str) -> dict:
+    """Try to parse JSON; on failure, raise with the raw text."""
+    try:
+        repaired = _repair_json(raw)
+        return json.loads(repaired)
+    except Exception as e:
+        raise ValueError(f"JSON parsing failed: {e}\nRaw: {raw[:200]}...")
+
+# ----------------------------------------------------------------------
+# Helper: limit items for LLM prompts
+# ----------------------------------------------------------------------
+def _limit_comments(data_list, max_items=20):
     return data_list[:max_items]
 
+# ----------------------------------------------------------------------
+# Main endpoint
+# ----------------------------------------------------------------------
 @router.get("/sections")
 def get_report_sections(
     province: Optional[str] = None,
@@ -22,13 +64,13 @@ def get_report_sections(
     db: Session = Depends(get_db)
 ):
     reports = crud.get_filtered_reports(db, province, district, start_date, end_date)
-    
+
     if not reports:
         return {"error": "No data found for the selected filters."}
 
-    # ------------------------------------------------------------------
-    # 4. Capacity Building and Workforce Transition
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
+    # 4. Capacity Building
+    # --------------------------------------------------------------
     capacity = []
     for r in reports:
         if r.raw_data:
@@ -49,9 +91,9 @@ def get_report_sections(
                 "support_gaps": r.raw_data.get("Who supported to address gaps?"),
             })
 
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
     # 5. Financial Sustainability
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
     financial = []
     for r in reports:
         if r.raw_data:
@@ -69,9 +111,9 @@ def get_report_sections(
                 "cats_comment": r.raw_data.get("Provision of stipends for CATS by NAC - Comments"),
             })
 
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
     # 6. Challenges & Mitigations
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
     challenges = []
     for r in reports:
         if r.raw_data:
@@ -81,9 +123,9 @@ def get_report_sections(
                 "mitigations": r.raw_data.get("Mitigation Strategies"),
             })
 
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
     # 7. Plan for Next Week
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
     plans = []
     for r in reports:
         if r.raw_data:
@@ -92,13 +134,13 @@ def get_report_sections(
                 "plan": r.raw_data.get("Facility planned activities for next week"),
             })
 
-    # ------------------------------------------------------------------
-    # LLM Summaries (aggregated) – limited to 30 facilities each
-    # ------------------------------------------------------------------
+    # --------------------------------------------------------------
+    # LLM Summaries (limit to 20 facilities per prompt)
+    # --------------------------------------------------------------
     summaries = {}
 
-    # 4. Capacity Building summary
-    cap_limited = _limit_comments(capacity, 30)
+    # 4. Capacity Building
+    cap_limited = _limit_comments(capacity, 20)
     if cap_limited:
         cap_text = "\n".join([
             f"{c['facility']}: gaps_supported={c['gaps_supported']}, nurse_testers={c['nurse_testers']}, "
@@ -109,7 +151,7 @@ def get_report_sections(
         ])
         if cap_text:
             try:
-                prompt_cap = f"""
+                prompt = f"""
 You are an expert in HIV programme transition. Based on the following aggregated capacity-building data across {len(cap_limited)} facilities, produce a JSON summary with:
 - "summary": a 2-3 sentence overview.
 - "strengths": list of positive findings.
@@ -120,17 +162,20 @@ Data:
 {cap_text}
 Return only valid JSON.
 """
-                resp = call_llm(prompt_cap, max_tokens=300)
-                summaries["capacity"] = json.loads(resp)
+                resp = call_llm(prompt, max_tokens=300)
+                summaries["capacity"] = _safe_json_loads(resp)
             except Exception as e:
-                summaries["capacity"] = {"error": str(e)}
+                logging.error(f"Capacity summary LLM failed: {e}")
+                summaries["capacity"] = {
+                    "summary": "Could not generate a summary for capacity building. Please review the table data."
+                }
         else:
             summaries["capacity"] = {"summary": "No capacity data available for the selected filters."}
     else:
         summaries["capacity"] = {"summary": "No capacity data available."}
 
-    # 5. Financial summary
-    fin_limited = _limit_comments(financial, 30)
+    # 5. Financial
+    fin_limited = _limit_comments(financial, 20)
     if fin_limited:
         fin_text = "\n".join([
             f"{f['facility']}: histology={f['histology']}, airtime={f['airtime']}, fuel={f['fuel']}, "
@@ -139,7 +184,7 @@ Return only valid JSON.
         ])
         if fin_text:
             try:
-                prompt_fin = f"""
+                prompt = f"""
 You are an expert in HIV programme transition. Based on the following aggregated financial sustainability data across {len(fin_limited)} facilities, produce a JSON summary with:
 - "summary": a 2-3 sentence overview.
 - "strengths": list of positive findings.
@@ -150,17 +195,20 @@ Data:
 {fin_text}
 Return only valid JSON.
 """
-                resp = call_llm(prompt_fin, max_tokens=300)
-                summaries["financial"] = json.loads(resp)
+                resp = call_llm(prompt, max_tokens=300)
+                summaries["financial"] = _safe_json_loads(resp)
             except Exception as e:
-                summaries["financial"] = {"error": str(e)}
+                logging.error(f"Financial summary LLM failed: {e}")
+                summaries["financial"] = {
+                    "summary": "Could not generate a summary for financial sustainability. Please review the table data."
+                }
         else:
             summaries["financial"] = {"summary": "No financial data available for the selected filters."}
     else:
         summaries["financial"] = {"summary": "No financial data available."}
 
-    # 6. Challenges summary
-    chal_limited = _limit_comments(challenges, 30)
+    # 6. Challenges
+    chal_limited = _limit_comments(challenges, 20)
     if chal_limited:
         chal_text = "\n".join([
             f"{c['facility']}: Challenges: {c['challenges']} | Mitigations: {c['mitigations']}"
@@ -168,7 +216,7 @@ Return only valid JSON.
         ])
         if chal_text:
             try:
-                prompt_chal = f"""
+                prompt = f"""
 You are an expert in HIV programme transition. Based on the following aggregated challenges and mitigations across {len(chal_limited)} facilities, produce a JSON summary with:
 - "summary": a 2-3 sentence overview.
 - "common_challenges": list of most frequent challenges.
@@ -179,22 +227,25 @@ Data:
 {chal_text}
 Return only valid JSON.
 """
-                resp = call_llm(prompt_chal, max_tokens=300)
-                summaries["challenges"] = json.loads(resp)
+                resp = call_llm(prompt, max_tokens=300)
+                summaries["challenges"] = _safe_json_loads(resp)
             except Exception as e:
-                summaries["challenges"] = {"error": str(e)}
+                logging.error(f"Challenges summary LLM failed: {e}")
+                summaries["challenges"] = {
+                    "summary": "Could not generate a summary for challenges. Please review the table data."
+                }
         else:
             summaries["challenges"] = {"summary": "No challenges data available for the selected filters."}
     else:
         summaries["challenges"] = {"summary": "No challenges data available."}
 
-    # 7. Plans summary
-    plan_limited = _limit_comments(plans, 30)
+    # 7. Plans
+    plan_limited = _limit_comments(plans, 20)
     if plan_limited:
         plan_text = "\n".join([f"{p['facility']}: {p['plan']}" for p in plan_limited if p.get('plan')])
         if plan_text:
             try:
-                prompt_plan = f"""
+                prompt = f"""
 You are an expert in HIV programme transition. Based on the following planned activities across {len(plan_limited)} facilities, produce a JSON summary with:
 - "summary": a 2-3 sentence overview.
 - "common_activities": list of recurring activities.
@@ -204,15 +255,21 @@ Data:
 {plan_text}
 Return only valid JSON.
 """
-                resp = call_llm(prompt_plan, max_tokens=300)
-                summaries["plans"] = json.loads(resp)
+                resp = call_llm(prompt, max_tokens=300)
+                summaries["plans"] = _safe_json_loads(resp)
             except Exception as e:
-                summaries["plans"] = {"error": str(e)}
+                logging.error(f"Plans summary LLM failed: {e}")
+                summaries["plans"] = {
+                    "summary": "Could not generate a summary for plans. Please review the table data."
+                }
         else:
             summaries["plans"] = {"summary": "No plans data available for the selected filters."}
     else:
         summaries["plans"] = {"summary": "No plans data available."}
 
+    # --------------------------------------------------------------
+    # Final response
+    # --------------------------------------------------------------
     return {
         "total_facilities": len(reports),
         "capacity": capacity,

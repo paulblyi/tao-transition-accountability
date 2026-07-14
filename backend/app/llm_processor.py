@@ -95,13 +95,27 @@ def process_comments(comments_dict: dict, facility_name: str = None, total_facil
         response_text = re.sub(r'```json\s*', '', response_text)
         response_text = re.sub(r'```\s*', '', response_text)
         
+        # Extract only the first valid JSON object
         start = response_text.find('{')
-        end = response_text.rfind('}')
-        if start != -1 and end != -1 and end > start:
-            json_str = response_text[start:end+1]
-        else:
-            raise ValueError("No valid JSON object found in response")
+        if start == -1:
+            raise ValueError("No JSON object found in response")
         
+        # Count braces to find the matching closing brace
+        braces = 0
+        end = start
+        for i in range(start, len(response_text)):
+            if response_text[i] == '{':
+                braces += 1
+            elif response_text[i] == '}':
+                braces -= 1
+                if braces == 0:
+                    end = i + 1
+                    break
+
+        if braces != 0:
+            raise ValueError("Unbalanced braces in JSON")
+
+        json_str = response_text[start:end]
         result = json.loads(json_str)
         
         return {

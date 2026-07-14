@@ -7,10 +7,10 @@ class FacilityReport(Base):
     id = Column(Integer, primary_key=True, index=True)
 
     # Core filters
-    province = Column(String)
-    district = Column(String)
+    province = Column(String, index=True)
+    district = Column(String, index=True)
     facility = Column(String)
-    week_ending = Column(DateTime)
+    week_ending = Column(DateTime, index=True)
     tao_name = Column(String)
     visit_type = Column(String)
     date_submitted = Column(DateTime)
