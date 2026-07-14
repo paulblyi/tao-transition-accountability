@@ -21,7 +21,7 @@ print(f"🔍 OpenAI client configured with base_url: {openai.base_url}")
 # ----------------------------------------------------------------------
 # 1. Helper to call the LLM (supports both OpenAI and Ollama)
 # ----------------------------------------------------------------------
-def call_llm(prompt: str, max_tokens: int = 500) -> str:
+def call_llm_old_version(prompt: str, max_tokens: int = 500) -> str:
     """
     Call the LLM. If the base URL indicates a local Ollama instance,
     use requests directly; otherwise, use the OpenAI client.
@@ -48,6 +48,53 @@ def call_llm(prompt: str, max_tokens: int = 500) -> str:
             logging.error(f"Ollama request failed: {e}")
             raise
     else:
+        messages = [{"role": "user", "content": prompt}]
+        response = openai.chat.completions.create(
+            model=settings.OPENAI_MODEL,
+            messages=messages,
+            temperature=0.3,
+            max_tokens=max_tokens
+        )
+        return response.choices[0].message.content
+
+def call_llm(prompt: str, max_tokens: int = 500) -> str:
+    """
+    Call the LLM. If the base URL indicates a local instance (localhost, host.docker.internal, or a private IP),
+    use requests directly; otherwise, use the OpenAI client.
+    """
+    base_url = settings.OPENAI_BASE_URL.lower()
+    is_local = (
+        "localhost" in base_url or 
+        "host.docker.internal" in base_url or 
+        "127.0.0.1" in base_url or
+        "172." in base_url or      # <-- catches 172.17.0.1 and other private IPs
+        "192.168." in base_url or
+        "10." in base_url
+    )
+    
+    if is_local:
+        # Build the full URL (ensure no double slashes)
+        url = f"{settings.OPENAI_BASE_URL}/chat/completions"
+        payload = {
+            "model": settings.OPENAI_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "temperature": 0.3,
+            "stream": False
+        }
+        try:
+            response = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=300)
+            response.raise_for_status()
+            data = response.json()
+            return data["choices"][0]["message"]["content"]
+        except requests.exceptions.Timeout:
+            logging.error("Ollama request timed out after 300 seconds.")
+            raise
+        except Exception as e:
+            logging.error(f"Ollama request failed: {e}")
+            raise
+    else:
+        # OpenAI / cloud provider via OpenAI client
         messages = [{"role": "user", "content": prompt}]
         response = openai.chat.completions.create(
             model=settings.OPENAI_MODEL,
