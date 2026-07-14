@@ -4,7 +4,6 @@ import logging
 from app.config import settings
 import requests
 
-# Make call_llm available for other modules
 __all__ = ['call_llm', 'process_comments']
 
 # ----------------------------------------------------------------------
@@ -27,7 +26,6 @@ def call_llm(prompt: str, max_tokens: int = 500) -> str:
     Call the LLM. If the base URL indicates a local Ollama instance,
     use requests directly; otherwise, use the OpenAI client.
     """
-    # If we are using Ollama (local)
     if "host.docker.internal" in settings.OPENAI_BASE_URL or "localhost" in settings.OPENAI_BASE_URL:
         url = f"{settings.OPENAI_BASE_URL}/chat/completions"
         payload = {
@@ -38,19 +36,18 @@ def call_llm(prompt: str, max_tokens: int = 500) -> str:
             "stream": False
         }
         try:
-            # 👇 Added timeout (120 seconds)
-            response = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=120)
+            # ⬆️ Increased timeout to 300 seconds
+            response = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=300)
             response.raise_for_status()
             data = response.json()
             return data["choices"][0]["message"]["content"]
         except requests.exceptions.Timeout:
-            logging.error("Ollama request timed out after 120 seconds.")
+            logging.error("Ollama request timed out after 300 seconds.")
             raise
         except Exception as e:
             logging.error(f"Ollama request failed: {e}")
             raise
     else:
-        # OpenAI / cloud provider via OpenAI client
         messages = [{"role": "user", "content": prompt}]
         response = openai.chat.completions.create(
             model=settings.OPENAI_MODEL,
@@ -64,19 +61,14 @@ def call_llm(prompt: str, max_tokens: int = 500) -> str:
 # 2. Main processing function
 # ----------------------------------------------------------------------
 def process_comments(comments_dict: dict, facility_name: str = None, total_facilities: int = 1) -> dict:
-    """
-    Takes a dict of comment fields and returns a structured insight.
-    Includes facility context for more specific summaries.
-    """
+    """Process comments and return structured insight."""
     if not comments_dict:
         return {"summary": "No comments provided.", "categories": [], "challenges": [], "mitigations": []}
 
-    # Combine all comment values into one text block
     full_text = "\n".join([f"{k}: {v}" for k, v in comments_dict.items() if v and str(v) != 'nan'])
     if not full_text.strip():
         return {"summary": "No meaningful comments.", "categories": [], "challenges": [], "mitigations": []}
 
-    # Build context for the LLM
     context = ""
     if facility_name:
         context = f"These comments are from the following facility: {facility_name}.\n"
@@ -99,12 +91,10 @@ def process_comments(comments_dict: dict, facility_name: str = None, total_facil
     try:
         response_text = call_llm(prompt)
 
-        # Remove markdown wrappers
         import re
         response_text = re.sub(r'```json\s*', '', response_text)
         response_text = re.sub(r'```\s*', '', response_text)
         
-        # Extract the JSON object by finding the first '{' and last '}'
         start = response_text.find('{')
         end = response_text.rfind('}')
         if start != -1 and end != -1 and end > start:

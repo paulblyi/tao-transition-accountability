@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import data, insights, filters, categorical
+from app.routes import data, insights, filters, categorical, report
 from app.database import engine, Base
 from app import models
 
@@ -22,6 +22,7 @@ app.include_router(data.router)
 app.include_router(insights.router)
 app.include_router(filters.router)  
 app.include_router(categorical.router)
+app.include_router(report.router)
 
 @app.get("/")
 def root():

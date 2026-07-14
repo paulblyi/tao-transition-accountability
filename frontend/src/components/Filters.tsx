@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Paper, Grid, TextField, Button, Select, MenuItem, FormControl, InputLabel } from '@mui/material';
 import { Filters as FiltersType } from '../types';
 import { getProvinces, getDistricts } from '../api/client';
@@ -15,24 +15,20 @@ const Filters: React.FC<Props> = ({ onFilterChange }) => {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
-  // Load provinces on mount
   useEffect(() => {
-    if (provinces.length === 0) { // For province and district lists, cache them in the frontend
-      getProvinces().then(res => setProvinces(res.data));
-    }
+    getProvinces().then(res => setProvinces(res.data));
   }, []);
 
-  // Load districts when province changes
   useEffect(() => {
     if (selectedProvince) {
       getDistricts(selectedProvince).then(res => setDistricts(res.data));
     } else {
       getDistricts().then(res => setDistricts(res.data));
     }
-    setSelectedDistrict(''); // reset district when province changes
+    setSelectedDistrict('');
   }, [selectedProvince]);
 
-  const applyFilters = () => {
+  const handleApply = () => {
     onFilterChange({
       province: selectedProvince || undefined,
       district: selectedDistrict || undefined,
@@ -93,7 +89,7 @@ const Filters: React.FC<Props> = ({ onFilterChange }) => {
           />
         </Grid>
         <Grid item xs={12} sm={2}>
-          <Button fullWidth variant="contained" onClick={applyFilters}>
+          <Button fullWidth variant="contained" onClick={handleApply}>
             Apply Filters
           </Button>
         </Grid>

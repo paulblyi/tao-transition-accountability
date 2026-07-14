@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from app.database import get_db
 from app import crud
-from app.llm_processor import call_llm   # <-- for the /insights endpoint
+from app.llm_processor import call_llm
 import json
 import logging
 
@@ -105,7 +105,7 @@ def get_categorical_summary(
 
 
 # ----------------------------------------------------------------------
-# 2. LLM‑generated governance insights
+# 2. LLM‑generated governance insights (with comment limit)
 # ----------------------------------------------------------------------
 @router.get("/insights")
 def get_governance_insights(
@@ -134,9 +134,13 @@ def get_governance_insights(
         ("Was the HCC/Health facility meeting done", "Comments.3")
     ]
     
-    # Build a structured text block
+    # Build structured text – limit to 30 comments
     comment_blocks = []
+    MAX_COMMENTS = 30
+    count = 0
     for report in reports:
+        if count >= MAX_COMMENTS:
+            break
         if not report.raw_data:
             continue
         facility = report.facility
@@ -150,6 +154,9 @@ def get_governance_insights(
                     f"  Response: {value}\n"
                     f"  Comment: {comment}\n"
                 )
+                count += 1
+                if count >= MAX_COMMENTS:
+                    break
     
     if not comment_blocks:
         return {

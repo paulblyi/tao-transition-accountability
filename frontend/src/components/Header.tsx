@@ -13,10 +13,11 @@ const Header: React.FC = () => {
     >
       <Toolbar>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          {/* Zimbabwe Bird Icon (you can use a text-based version) */}
-          <Typography variant="h4" sx={{ fontWeight: 'bold', color: 'white', textShadow: '1px 1px 3px rgba(0,0,0,0.3)' }}>
-            🐦
-          </Typography>
+          <img 
+            src="/zhi_logo.png" 
+            alt="ZHI Logo" 
+            style={{ height: '50px', width: 'auto' }} 
+          />
           <Box>
             <Typography variant="h4" sx={{ fontWeight: 'bold', color: 'white', textShadow: '1px 1px 3px rgba(0,0,0,0.3)' }}>
               TAO Transition Accountability System

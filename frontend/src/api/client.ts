@@ -24,3 +24,6 @@ export const getGovernanceInsights = (filters: any) =>
 
 export const getCategoricalSummary = (filters: any) =>
   api.get('/categorical/summary', { params: filters });
+
+export const getReportSections = (filters: any) =>
+  api.get('/report/sections', { params: filters });
