@@ -14,19 +14,13 @@ import {
   ListItemText,
 } from '@mui/material';
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
   PieChart,
   Pie,
   Cell,
+  Tooltip,
+  ResponsiveContainer,
 } from 'recharts';
-import { getCoverage, getTransitionRisk } from '../api/client';
+import { getCoverage, getTransitionRisk, getRiskNarrative } from '../api/client';
 
 interface Props {
   filters: any;
@@ -35,6 +29,7 @@ interface Props {
 const TransitionDashboard: React.FC<Props> = ({ filters }) => {
   const [coverage, setCoverage] = useState<any>(null);
   const [risk, setRisk] = useState<any>(null);
+  const [narrative, setNarrative] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,14 +38,17 @@ const TransitionDashboard: React.FC<Props> = ({ filters }) => {
       setLoading(true);
       setError(null);
       try {
-        const [covRes, riskRes] = await Promise.all([
+        const [covRes, riskRes, narrativeRes] = await Promise.all([
           getCoverage(filters),
           getTransitionRisk(filters),
+          getRiskNarrative(filters),
         ]);
         setCoverage(covRes.data);
         setRisk(riskRes.data);
+        setNarrative(narrativeRes.data.narrative);
       } catch (err: any) {
         setError(err.message || 'Failed to load transition data');
+        console.error('Transition data error:', err);
       } finally {
         setLoading(false);
       }
@@ -97,7 +95,7 @@ const TransitionDashboard: React.FC<Props> = ({ filters }) => {
   ] : [];
   const COLORS = ['#D32F2F', '#FFA726', '#4CAF50'];
 
-  // Top 5 high-risk facilities
+  // Top high-risk facilities
   const highRiskFacilities = risk?.facilities?.filter((r: any) => r.risk_level === 'High') || [];
 
   return (
@@ -139,35 +137,55 @@ const TransitionDashboard: React.FC<Props> = ({ filters }) => {
           </Card>
         </Grid>
 
-        {/* Risk Pie Chart */}
-        {risk && riskData.some(d => d.value > 0) && (
-          <Grid item xs={12} md={6}>
-            <Box sx={{ height: 250 }}>
-              <Typography variant="subtitle2" gutterBottom>Transition Risk Distribution</Typography>
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={riskData}
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={80}
-                    dataKey="value"
-                    label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
-                  >
-                    {riskData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
-            </Box>
-          </Grid>
-        )}
+        {/* Risk Pie Chart + Narrative side by side */}
+        <Grid item xs={12} md={6}>
+          <Box sx={{ height: 250 }}>
+            <Typography variant="subtitle2" gutterBottom>Transition Risk Distribution</Typography>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={riskData}
+                  cx="50%"
+                  cy="50%"
+                  outerRadius={80}
+                  dataKey="value"
+                  label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                >
+                  {riskData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          </Box>
+        </Grid>
+
+        {/* Narrative box */}
+        <Grid item xs={12} md={6}>
+          <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <Typography variant="subtitle2" gutterBottom>📋 Accountability & Readiness Narrative</Typography>
+            <Paper
+              elevation={0}
+              sx={{
+                p: 2,
+                bgcolor: '#f5f5f5',
+                borderRadius: 2,
+                minHeight: 120,
+                display: 'flex',
+                alignItems: 'center',
+              }}
+            >
+              <Typography variant="body2" fontStyle="italic">
+                {narrative || 'Loading narrative...'}
+              </Typography>
+            </Paper>
+          </Box>
+        </Grid>
 
         {/* Priority facilities (not tracked recently) */}
         {coverage.not_tracked_recently && coverage.not_tracked_recently.length > 0 && (
-          <Grid item xs={12} md={6}>
+          <Grid item xs={12}>
             <Typography variant="subtitle2" gutterBottom>⚠️ Priority Facilities to Track</Typography>
             <Box sx={{ maxHeight: 200, overflow: 'auto' }}>
               <List dense>
@@ -189,7 +207,7 @@ const TransitionDashboard: React.FC<Props> = ({ filters }) => {
           </Grid>
         )}
 
-        {/* High-risk facilities list */}
+        {/* High-risk facilities */}
         {highRiskFacilities.length > 0 && (
           <Grid item xs={12}>
             <Typography variant="subtitle2" gutterBottom color="error">🔴 High-Risk Facilities – Urgent Action Required</Typography>

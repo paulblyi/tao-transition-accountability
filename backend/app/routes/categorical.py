@@ -187,7 +187,7 @@ def get_governance_insights(
             "recommendations": []
         }
 
-    # Define the governance indicators (same as above)
+    # Define the governance indicators
     indicators = [
         ("Sustainability Transition Focal Person in place?", "Comments"),
         ("Availability and functionality of Health Centre Committee", "Comments.1"),
@@ -205,11 +205,15 @@ def get_governance_insights(
         if not report.raw_data:
             continue
         facility = report.facility
+        district_name = report.district or "Unknown"
+        province_name = report.province or "Unknown"
         for indicator, comment_key in indicators:
             value = report.raw_data.get(indicator)
             comment = report.raw_data.get(comment_key)
             if value and comment:
                 comment_blocks.append(
+                    f"Province: {province_name}\n"
+                    f"District: {district_name}\n"
                     f"Facility: {facility}\n"
                     f"  Indicator: {indicator}\n"
                     f"  Response: {value}\n"
@@ -219,57 +223,61 @@ def get_governance_insights(
                 if count >= MAX_COMMENTS:
                     break
     
-    # If there are comments, try LLM; otherwise use fallback
-    if comment_blocks:
-        combined_text = "\n".join(comment_blocks)
-        prompt = f"""
-You are an expert in HIV programme transition and accountability. 
-The ACCE project is transitioning to MOHCC ownership in Zimbabwe.
+    if not comment_blocks:
+        return {
+            "total_facilities": len(reports),
+            "summary": "No governance comments available for the selected filters.",
+            "strengths": [],
+            "challenges": [],
+            "recommendations": []
+        }
+
+    combined_text = "\n".join(comment_blocks)
+    
+    # ---- STRICT PROMPT TO PREVENT HALLUCINATION ----
+    prompt = f"""
+You are an expert in HIV programme transition and accountability.
+
+**IMPORTANT RULES – YOU MUST FOLLOW THEM EXACTLY:**
+1. ONLY mention districts and facilities that are EXPLICITLY listed in the comments below.
+2. DO NOT invent or assume any district or facility names that are not in the comments.
+3. The hierarchy is: Province -> District -> Facility.
+4. If you are not sure about a name, DO NOT mention it.
+5. The selected province is: {province or "All provinces"}.
+6. The selected district is: {district or "All districts"}.
 
 **Context**:
 - {len(reports)} facilities are being assessed for transition readiness.
 - Each facility should have a Sustainability Transition Focal Person, a functional HCC, a sustainability plan, and regular HCC meetings.
-- Accountability to the donor and MOHCC requires evidence of transition progress.
 
-**Governance Comments**:
+**Comments**:
 {combined_text}
 
-Based on these comments, produce a JSON output with:
-1. "summary": a concise summary (2-3 sentences) stating **how many facilities are transition-ready** versus those needing attention. Mention specific districts or facilities if patterns emerge.
-2. "strengths": list of governance strengths that support a smooth transition.
-3. "challenges": list of governance gaps that **pose a risk to the transition**.
-4. "recommendations": actionable steps to **strengthen governance and accountability** before project end.
+Based ONLY on the comments above, produce a JSON output with:
+1. "summary": a concise 2-3 sentence summary. ONLY mention districts/facilities that appear in the comments.
+2. "strengths": list of governance strengths observed (ONLY from the comments).
+3. "challenges": list of governance gaps identified (ONLY from the comments).
+4. "recommendations": actionable steps based on the challenges observed.
 
 Return only valid JSON, no extra text.
 """
-        try:
-            response_text = call_llm(prompt, max_tokens=500)
-            # Clean up markdown if present
-            if "```json" in response_text:
-                response_text = response_text.split("```json")[1].split("```")[0].strip()
-            elif "```" in response_text:
-                response_text = response_text.split("```")[1].split("```")[0].strip()
-            result = safe_json_loads(response_text)
-            return {
-                "total_facilities": len(reports),
-                "summary": result.get("summary", ""),
-                "strengths": result.get("strengths", []),
-                "challenges": result.get("challenges", []),
-                "recommendations": result.get("recommendations", [])
-            }
-        except Exception as e:
-            logging.error(f"Governance insights LLM failed: {e}")
-            # Fallback to rule-based summary
-            fallback = _generate_fallback_summary(reports)
-            return {
-                "total_facilities": len(reports),
-                "summary": fallback["summary"],
-                "strengths": fallback["strengths"],
-                "challenges": fallback["challenges"],
-                "recommendations": fallback["recommendations"]
-            }
-    else:
-        # No comments – use rule-based fallback
+    try:
+        response_text = call_llm(prompt, max_tokens=500)
+        # Clean up markdown if present
+        if "```json" in response_text:
+            response_text = response_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in response_text:
+            response_text = response_text.split("```")[1].split("```")[0].strip()
+        result = safe_json_loads(response_text)
+        return {
+            "total_facilities": len(reports),
+            "summary": result.get("summary", ""),
+            "strengths": result.get("strengths", []),
+            "challenges": result.get("challenges", []),
+            "recommendations": result.get("recommendations", [])
+        }
+    except Exception as e:
+        logging.error(f"Governance insights LLM failed: {e}")
         fallback = _generate_fallback_summary(reports)
         return {
             "total_facilities": len(reports),

@@ -1,16 +1,50 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  Paper, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Box, Divider
+  Paper,
+  Typography,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Box,
+  TablePagination,
 } from '@mui/material';
 
 const CapacityBuilding: React.FC<{ data: any[]; summary: any }> = ({ data, summary }) => {
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(5);
+
+  useEffect(() => {
+    setPage(0);
+  }, [data]);
+
   if (!data || data.length === 0) return <Typography>No capacity data.</Typography>;
+
+  const startIndex = page * rowsPerPage;
+  const paginatedData = data.slice(startIndex, startIndex + rowsPerPage);
 
   return (
     <Paper sx={{ p: 2, mb: 2 }}>
-      <Typography variant="h6" gutterBottom>4. Capacity Building & Workforce Transition</Typography>
-      
+      <Typography variant="h6" gutterBottom>Capacity Building & Workforce Transition</Typography>
+
+      {summary && summary.summary && (
+        <Box sx={{ bgcolor: '#f5f5f5', p: 2, borderRadius: 1, mb: 2 }}>
+          <Typography variant="subtitle2" fontWeight="bold" gutterBottom>📌 Key Takeaways</Typography>
+          <Typography variant="body2" paragraph>{summary.summary}</Typography>
+          {summary.strengths && summary.strengths.length > 0 && (
+            <Typography variant="body2"><strong>Strengths:</strong> {summary.strengths.join(', ')}</Typography>
+          )}
+          {summary.gaps && summary.gaps.length > 0 && (
+            <Typography variant="body2"><strong>Gaps:</strong> {summary.gaps.join(', ')}</Typography>
+          )}
+          {summary.recommendations && summary.recommendations.length > 0 && (
+            <Typography variant="body2"><strong>Recommendations:</strong> {summary.recommendations.join(', ')}</Typography>
+          )}
+        </Box>
+      )}
+
       <TableContainer>
         <Table size="small">
           <TableHead>
@@ -29,7 +63,7 @@ const CapacityBuilding: React.FC<{ data: any[]; summary: any }> = ({ data, summa
             </TableRow>
           </TableHead>
           <TableBody>
-            {data.map((row, idx) => (
+            {paginatedData.map((row, idx) => (
               <TableRow key={idx}>
                 <TableCell>{row.facility}</TableCell>
                 <TableCell>{row.gaps_supported || '-'}</TableCell>
@@ -47,27 +81,20 @@ const CapacityBuilding: React.FC<{ data: any[]; summary: any }> = ({ data, summa
           </TableBody>
         </Table>
       </TableContainer>
-
-      {/* Bottom Summary */}
-      {summary && summary.summary && (
-        <>
-          <Divider sx={{ my: 2 }} />
-          <Box sx={{ bgcolor: '#f5f5f5', p: 2, borderRadius: 1 }}>
-            <Typography variant="subtitle2" fontWeight="bold" gutterBottom>📌 Key Takeaways</Typography>
-            <Typography variant="body2" paragraph>{summary.summary}</Typography>
-            {summary.strengths && summary.strengths.length > 0 && (
-              <Typography variant="body2"><strong>Strengths:</strong> {summary.strengths.join(', ')}</Typography>
-            )}
-            {summary.gaps && summary.gaps.length > 0 && (
-              <Typography variant="body2"><strong>Gaps:</strong> {summary.gaps.join(', ')}</Typography>
-            )}
-            {summary.recommendations && summary.recommendations.length > 0 && (
-              <Typography variant="body2"><strong>Recommendations:</strong> {summary.recommendations.join(', ')}</Typography>
-            )}
-          </Box>
-        </>
-      )}
+      <TablePagination
+        rowsPerPageOptions={[5, 10, 25]}
+        component="div"
+        count={data.length}
+        rowsPerPage={rowsPerPage}
+        page={page}
+        onPageChange={(e, newPage) => setPage(newPage)}
+        onRowsPerPageChange={(e) => {
+          setRowsPerPage(parseInt(e.target.value, 10));
+          setPage(0);
+        }}
+      />
     </Paper>
   );
 };
+
 export default CapacityBuilding;

@@ -3,6 +3,7 @@ import json
 import logging
 from app.config import settings
 import requests
+from app.utils import safe_json_loads
 
 __all__ = ['call_llm', 'process_comments']
 
@@ -149,16 +150,15 @@ Return only valid JSON, no extra text.
     try:
         response_text = call_llm(prompt)
 
+        # Remove markdown wrappers
         import re
         response_text = re.sub(r'```json\s*', '', response_text)
         response_text = re.sub(r'```\s*', '', response_text)
-        
+
         # Extract only the first valid JSON object
         start = response_text.find('{')
         if start == -1:
             raise ValueError("No JSON object found in response")
-        
-        # Count braces to find the matching closing brace
         braces = 0
         end = start
         for i in range(start, len(response_text)):
@@ -169,13 +169,12 @@ Return only valid JSON, no extra text.
                 if braces == 0:
                     end = i + 1
                     break
-
         if braces != 0:
             raise ValueError("Unbalanced braces in JSON")
 
         json_str = response_text[start:end]
-        result = json.loads(json_str)
-        
+        result = safe_json_loads(json_str)   # <-- use safe_json_loads
+
         return {
             "summary": result.get("summary", ""),
             "categories": result.get("categories", []),
@@ -184,4 +183,10 @@ Return only valid JSON, no extra text.
         }
     except Exception as e:
         logging.error(f"LLM processing failed: {e}")
-        return {"summary": f"Error: {str(e)}", "categories": [], "challenges": [], "mitigations": []}
+        # Return a fallback summary
+        return {
+            "summary": f"Unable to generate structured insight for {facility_name or 'this facility'}.",
+            "categories": [],
+            "challenges": [],
+            "mitigations": []
+        }

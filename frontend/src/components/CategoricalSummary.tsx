@@ -12,6 +12,7 @@ import {
   Chip,
   IconButton,
   Collapse,
+  TablePagination,
   CircularProgress,
   Alert,
 } from '@mui/material';
@@ -38,6 +39,8 @@ const CategoricalSummary: React.FC<Props> = ({ filters }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(5);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -48,13 +51,16 @@ const CategoricalSummary: React.FC<Props> = ({ filters }) => {
         setData(response.data);
       } catch (err: any) {
         setError(err.message || 'Failed to load categorical data');
-        console.error('Categorical error:', err);
       } finally {
         setLoading(false);
       }
     };
     fetchData();
   }, [filters]);
+
+  useEffect(() => {
+    setPage(0);
+  }, [data]);
 
   if (loading) {
     return (
@@ -91,6 +97,9 @@ const CategoricalSummary: React.FC<Props> = ({ filters }) => {
     setExpanded(expanded === indicator ? null : indicator);
   };
 
+  const startIndex = page * rowsPerPage;
+  const paginatedData = data.slice(startIndex, startIndex + rowsPerPage);
+
   return (
     <Paper sx={{ p: 2 }}>
       <Typography variant="h6" gutterBottom>Key Indicators Summary</Typography>
@@ -107,7 +116,7 @@ const CategoricalSummary: React.FC<Props> = ({ filters }) => {
             </TableRow>
           </TableHead>
           <TableBody>
-            {data.map((row) => (
+            {paginatedData.map((row) => (
               <React.Fragment key={row.indicator}>
                 <TableRow hover>
                   <TableCell>{row.indicator}</TableCell>
@@ -157,6 +166,18 @@ const CategoricalSummary: React.FC<Props> = ({ filters }) => {
           </TableBody>
         </Table>
       </TableContainer>
+      <TablePagination
+        rowsPerPageOptions={[5, 10, 25]}
+        component="div"
+        count={data.length}
+        rowsPerPage={rowsPerPage}
+        page={page}
+        onPageChange={(e, newPage) => setPage(newPage)}
+        onRowsPerPageChange={(e) => {
+          setRowsPerPage(parseInt(e.target.value, 10));
+          setPage(0);
+        }}
+      />
     </Paper>
   );
 };

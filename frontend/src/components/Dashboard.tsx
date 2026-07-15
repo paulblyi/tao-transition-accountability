@@ -16,6 +16,7 @@ import ReportSections from './ReportSections';
 import DistrictComparison from './DistrictComparison';
 import FacilityScorecard from './FacilityScorecard';
 import TransitionDashboard from './TransitionDashboard';
+import Footer from './Footer';
 
 type AggregatedInsight = Insight & {
   facilities?: string;
@@ -195,11 +196,14 @@ const Dashboard: React.FC = () => {
   };
 
   return (
-    <Container maxWidth="xl" sx={{ mt: 4 }}>
+    <Container maxWidth="xl" sx={{ mt: 4, display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       <Header />
       <Filters onFilterChange={handleFilterChange} />
       <ActiveFilters filters={appliedFilters} />
-      {renderContent()}
+      <Box sx={{ flex: 1 }}>
+        {renderContent()}
+      </Box>
+      <Footer />
     </Container>
   );
 };

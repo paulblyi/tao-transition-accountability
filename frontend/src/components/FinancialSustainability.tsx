@@ -1,8 +1,30 @@
-import React from 'react';
-import { Paper, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Box, Divider } from '@mui/material';
+import React, { useState, useEffect } from 'react';
+import { 
+  Paper, 
+  Typography, 
+  Table, 
+  TableBody, 
+  TableCell, 
+  TableContainer, 
+  TableHead, 
+  TableRow, 
+  Box, 
+  Divider,
+  TablePagination, 
+} from '@mui/material';
 
 const FinancialSustainability: React.FC<{ data: any[]; summary: any }> = ({ data, summary }) => {
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(5);
+
+  useEffect(() => {
+    setPage(0);
+  }, [data]);
+  
   if (!data || data.length === 0) return <Typography>No financial data.</Typography>;
+  
+  const startIndex = page * rowsPerPage;
+  const paginatedData = data.slice(startIndex, startIndex + rowsPerPage);
 
   return (
     <Paper sx={{ p: 2, mb: 2 }}>
@@ -26,7 +48,7 @@ const FinancialSustainability: React.FC<{ data: any[]; summary: any }> = ({ data
             </TableRow>
           </TableHead>
           <TableBody>
-            {data.map((row, idx) => (
+            {paginatedData.map((row, idx) => (
               <TableRow key={idx}>
                 <TableCell>{row.facility}</TableCell>
                 <TableCell>{row.histology || '-'}</TableCell>
@@ -44,7 +66,18 @@ const FinancialSustainability: React.FC<{ data: any[]; summary: any }> = ({ data
           </TableBody>
         </Table>
       </TableContainer>
-
+      <TablePagination
+        rowsPerPageOptions={[5, 10, 25]}
+        component="div"
+        count={data.length}
+        rowsPerPage={rowsPerPage}
+        page={page}
+        onPageChange={(e, newPage) => setPage(newPage)}
+        onRowsPerPageChange={(e) => {
+          setRowsPerPage(parseInt(e.target.value, 10));
+          setPage(0);
+        }}
+      />
       {/* Bottom Summary */}
       {summary && summary.summary && (
         <>

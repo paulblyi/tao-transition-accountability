@@ -33,3 +33,6 @@ export const getCoverage = (filters: any) =>
 
 export const getTransitionRisk = (filters: any) =>
   api.get('/coverage/risk', { params: filters });
+
+export const getRiskNarrative = (filters: any) =>
+  api.get('/coverage/narrative', { params: filters });
