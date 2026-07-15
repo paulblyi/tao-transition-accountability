@@ -42,15 +42,22 @@ const CategoricalSummary: React.FC<Props> = ({ filters }) => {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(5);
 
+  // Reset page when data changes (e.g., new filters)
+  useEffect(() => {
+    setPage(0);
+  }, [data]);
+
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
       setError(null);
       try {
         const response = await getCategoricalSummary(filters);
-        setData(response.data);
+        // Ensure data is an array (fallback to empty array)
+        setData(Array.isArray(response.data) ? response.data : []);
       } catch (err: any) {
         setError(err.message || 'Failed to load categorical data');
+        setData([]);
       } finally {
         setLoading(false);
       }
@@ -58,9 +65,15 @@ const CategoricalSummary: React.FC<Props> = ({ filters }) => {
     fetchData();
   }, [filters]);
 
-  useEffect(() => {
-    setPage(0);
-  }, [data]);
+  // Handlers
+  const handleChangePage = (event: unknown, newPage: number) => {
+    setPage(newPage);
+  };
+
+  const handleChangeRowsPerPage = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setRowsPerPage(parseInt(event.target.value, 10));
+    setPage(0); // Reset to first page when rows per page changes
+  };
 
   if (loading) {
     return (
@@ -97,12 +110,14 @@ const CategoricalSummary: React.FC<Props> = ({ filters }) => {
     setExpanded(expanded === indicator ? null : indicator);
   };
 
+  // Slice data for current page
   const startIndex = page * rowsPerPage;
   const paginatedData = data.slice(startIndex, startIndex + rowsPerPage);
 
   return (
     <Paper sx={{ p: 2 }}>
       <Typography variant="h6" gutterBottom>Key Indicators Summary</Typography>
+
       <TableContainer>
         <Table size="small">
           <TableHead>
@@ -166,17 +181,15 @@ const CategoricalSummary: React.FC<Props> = ({ filters }) => {
           </TableBody>
         </Table>
       </TableContainer>
+
       <TablePagination
         rowsPerPageOptions={[5, 10, 25]}
         component="div"
         count={data.length}
         rowsPerPage={rowsPerPage}
         page={page}
-        onPageChange={(e, newPage) => setPage(newPage)}
-        onRowsPerPageChange={(e) => {
-          setRowsPerPage(parseInt(e.target.value, 10));
-          setPage(0);
-        }}
+        onPageChange={handleChangePage}
+        onRowsPerPageChange={handleChangeRowsPerPage}
       />
     </Paper>
   );
