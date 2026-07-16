@@ -4,44 +4,12 @@ from typing import Optional
 from app.database import get_db
 from app import crud
 from app.llm_processor import call_llm
+from app.utils import safe_json_loads
 import json
 import logging
 import re
 
 router = APIRouter(prefix="/api/report", tags=["report"])
-
-# ----------------------------------------------------------------------
-# Helper: JSON repair and safe loading
-# ----------------------------------------------------------------------
-def _repair_json(raw: str) -> str:
-    raw = re.sub(r'```json\s*', '', raw)
-    raw = re.sub(r'```\s*', '', raw)
-    start = raw.find('{')
-    if start == -1:
-        raise ValueError("No JSON object found in response")
-    braces = 0
-    end = start
-    for i in range(start, len(raw)):
-        if raw[i] == '{':
-            braces += 1
-        elif raw[i] == '}':
-            braces -= 1
-            if braces == 0:
-                end = i + 1
-                break
-    if braces != 0:
-        raise ValueError("Unbalanced braces")
-    json_str = raw[start:end]
-    json_str = re.sub(r',\s*}', '}', json_str)
-    json_str = re.sub(r',\s*]', ']', json_str)
-    return json_str
-
-def _safe_json_loads(raw: str) -> dict:
-    try:
-        repaired = _repair_json(raw)
-        return json.loads(repaired)
-    except Exception as e:
-        raise ValueError(f"JSON parsing failed: {e}\nRaw: {raw[:200]}...")
 
 # ----------------------------------------------------------------------
 # Helper: limit items for LLM prompts
@@ -50,12 +18,11 @@ def _limit_comments(data_list, max_items=20):
     return data_list[:max_items]
 
 # ----------------------------------------------------------------------
-# Rule-based fallback summaries
+# Rule-based fallback summaries (with llm_failed flag)
 # ----------------------------------------------------------------------
 def generate_capacity_summary(data: list) -> dict:
     if not data:
-        return {"summary": "No capacity building data available."}
-    
+        return {"summary": "No capacity building data available.", "llm_failed": False}
     total = len(data)
     with_gaps = sum(1 for c in data if c.get('gaps_supported') is not None)
     with_testers = sum(1 for c in data if c.get('nurse_testers') is not None)
@@ -63,56 +30,49 @@ def generate_capacity_summary(data: list) -> dict:
     with_vl = sum(1 for c in data if c.get('vl_mentored') is not None)
     with_ahd = sum(1 for c in data if c.get('ahd_supported') is not None)
     with_oi_focal = sum(1 for c in data if c.get('oi_focal') == "Yes")
-    
     summary = (
         f"Across {total} facilities, {with_gaps} reported capacity gaps. "
         f"{with_testers} facilities have nurse testers, {with_viac} have VIAC-trained staff, "
         f"{with_vl} have VL mentorship, {with_ahd} have AHD support, "
         f"and {with_oi_focal} have an OI focal person in place."
     )
-    return {"summary": summary}
+    return {"summary": summary, "llm_failed": False}
 
 def generate_financial_summary(data: list) -> dict:
     if not data:
-        return {"summary": "No financial sustainability data available."}
-    
+        return {"summary": "No financial sustainability data available.", "llm_failed": False}
     total = len(data)
     has_histology = sum(1 for f in data if f.get('histology') == "Yes")
     has_airtime = sum(1 for f in data if f.get('airtime') == "Yes")
     has_fuel = sum(1 for f in data if f.get('fuel') == "Yes")
     has_stationery = sum(1 for f in data if f.get('stationery') == "Yes")
     has_cats = sum(1 for f in data if f.get('cats_stipends') == "Yes")
-    
     summary = (
         f"Of {total} facilities, {has_histology} have histology coupons, "
         f"{has_airtime} have facility airtime, {has_fuel} have fuel for outreach, "
         f"{has_stationery} have stationery for VHCWs, and {has_cats} receive CATS stipends from NAC."
     )
-    return {"summary": summary}
+    return {"summary": summary, "llm_failed": False}
 
 def generate_challenges_summary(data: list) -> dict:
     if not data:
-        return {"summary": "No challenges data available."}
-    
+        return {"summary": "No challenges data available.", "llm_failed": False}
     total = len(data)
     challenges_mentioned = sum(1 for c in data if c.get('challenges') is not None)
     mitigations_mentioned = sum(1 for c in data if c.get('mitigations') is not None)
-    
     summary = (
         f"Across {total} facilities, {challenges_mentioned} reported challenges, "
         f"and {mitigations_mentioned} have documented mitigation strategies."
     )
-    return {"summary": summary}
+    return {"summary": summary, "llm_failed": False}
 
 def generate_plans_summary(data: list) -> dict:
     if not data:
-        return {"summary": "No plans data available."}
-    
+        return {"summary": "No plans data available.", "llm_failed": False}
     total = len(data)
     has_plan = sum(1 for p in data if p.get('plan') is not None)
-    
     summary = f"Of {total} facilities, {has_plan} have documented plans for next week."
-    return {"summary": summary}
+    return {"summary": summary, "llm_failed": False}
 
 # ----------------------------------------------------------------------
 # Main endpoint
@@ -123,16 +83,16 @@ def get_report_sections(
     district: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    skip_llm: bool = False,
     db: Session = Depends(get_db)
 ):
     reports = crud.get_filtered_reports(db, province, district, start_date, end_date)
-
     if not reports:
         return {"error": "No data found for the selected filters."}
 
-    # --------------------------------------------------------------
-    # 4. Capacity Building
-    # --------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # 4. Capacity Building and Workforce Transition
+    # ------------------------------------------------------------------
     capacity = []
     for r in reports:
         if r.raw_data:
@@ -153,9 +113,9 @@ def get_report_sections(
                 "support_gaps": r.raw_data.get("Who supported to address gaps?"),
             })
 
-    # --------------------------------------------------------------
+    # ------------------------------------------------------------------
     # 5. Financial Sustainability
-    # --------------------------------------------------------------
+    # ------------------------------------------------------------------
     financial = []
     for r in reports:
         if r.raw_data:
@@ -173,9 +133,9 @@ def get_report_sections(
                 "cats_comment": r.raw_data.get("Provision of stipends for CATS by NAC - Comments"),
             })
 
-    # --------------------------------------------------------------
+    # ------------------------------------------------------------------
     # 6. Challenges & Mitigations
-    # --------------------------------------------------------------
+    # ------------------------------------------------------------------
     challenges = []
     for r in reports:
         if r.raw_data:
@@ -185,9 +145,9 @@ def get_report_sections(
                 "mitigations": r.raw_data.get("Mitigation Strategies"),
             })
 
-    # --------------------------------------------------------------
+    # ------------------------------------------------------------------
     # 7. Plan for Next Week
-    # --------------------------------------------------------------
+    # ------------------------------------------------------------------
     plans = []
     for r in reports:
         if r.raw_data:
@@ -196,25 +156,50 @@ def get_report_sections(
                 "plan": r.raw_data.get("Facility planned activities for next week"),
             })
 
-    # --------------------------------------------------------------
-    # LLM Summaries with rule-based fallbacks
-    # --------------------------------------------------------------
-    summaries = {}
-
-    # 4. Capacity Building
     cap_limited = _limit_comments(capacity, 20)
-    if cap_limited:
+    fin_limited = _limit_comments(financial, 20)
+    chal_limited = _limit_comments(challenges, 20)
+    plan_limited = _limit_comments(plans, 20)
+
+    summaries = {}
+    any_llm_failed = False
+
+    # ------------------------------------------------------------------
+    # Helper to process each section
+    # ------------------------------------------------------------------
+    def process_section(name, data, prompt_builder, fallback_func):
+        nonlocal any_llm_failed
+        if skip_llm:
+            return fallback_func(data)
+        try:
+            text = prompt_builder(data)
+            if text:
+                resp = call_llm(text, max_tokens=300)
+                result = safe_json_loads(resp)
+                result["llm_failed"] = False
+                return result
+            else:
+                return fallback_func(data)
+        except Exception as e:
+            logging.error(f"{name} summary LLM failed: {e}")
+            any_llm_failed = True
+            fallback = fallback_func(data)
+            fallback["llm_failed"] = True
+            return fallback
+
+    # Build prompts for each section
+    def cap_prompt(data):
         cap_text = "\n".join([
             f"{c['facility']}: gaps_supported={c['gaps_supported']}, nurse_testers={c['nurse_testers']}, "
             f"viac_trained={c['viac_trained']}, vl_mentored={c['vl_mentored']}, ahd_supported={c['ahd_supported']}, "
             f"logistics_supported={c['logistics_supported']}, oi_focal={c['oi_focal']}, vhw_mentored={c['vhw_mentored']}, "
             f"defaulter_pct={c['defaulter_pct']}, disruptions={c['disruptions']}"
-            for c in cap_limited if c.get('gaps_supported') is not None
+            for c in data if c.get('gaps_supported') is not None
         ])
-        if cap_text:
-            try:
-                prompt = f"""
-You are an expert in HIV programme transition. Based on the following aggregated capacity-building data across {len(cap_limited)} facilities, produce a JSON summary with:
+        if not cap_text:
+            return None
+        return f"""
+You are an expert in HIV programme transition. Based on the following aggregated capacity-building data across {len(data)} facilities, produce a JSON summary with:
 - "summary": a 2-3 sentence overview.
 - "strengths": list of positive findings.
 - "gaps": list of areas needing improvement.
@@ -224,28 +209,17 @@ Data:
 {cap_text}
 Return only valid JSON.
 """
-                resp = call_llm(prompt, max_tokens=300)
-                summaries["capacity"] = _safe_json_loads(resp)
-            except Exception as e:
-                logging.error(f"Capacity summary LLM failed: {e}")
-                summaries["capacity"] = generate_capacity_summary(cap_limited)
-        else:
-            summaries["capacity"] = generate_capacity_summary(cap_limited)
-    else:
-        summaries["capacity"] = {"summary": "No capacity data available."}
 
-    # 5. Financial
-    fin_limited = _limit_comments(financial, 20)
-    if fin_limited:
+    def fin_prompt(data):
         fin_text = "\n".join([
             f"{f['facility']}: histology={f['histology']}, airtime={f['airtime']}, fuel={f['fuel']}, "
             f"stationery={f['stationery']}, cats={f['cats_stipends']}"
-            for f in fin_limited if f.get('histology') is not None
+            for f in data if f.get('histology') is not None
         ])
-        if fin_text:
-            try:
-                prompt = f"""
-You are an expert in HIV programme transition. Based on the following aggregated financial sustainability data across {len(fin_limited)} facilities, produce a JSON summary with:
+        if not fin_text:
+            return None
+        return f"""
+You are an expert in HIV programme transition. Based on the following aggregated financial sustainability data across {len(data)} facilities, produce a JSON summary with:
 - "summary": a 2-3 sentence overview.
 - "strengths": list of positive findings.
 - "gaps": list of areas needing improvement.
@@ -255,27 +229,16 @@ Data:
 {fin_text}
 Return only valid JSON.
 """
-                resp = call_llm(prompt, max_tokens=300)
-                summaries["financial"] = _safe_json_loads(resp)
-            except Exception as e:
-                logging.error(f"Financial summary LLM failed: {e}")
-                summaries["financial"] = generate_financial_summary(fin_limited)
-        else:
-            summaries["financial"] = generate_financial_summary(fin_limited)
-    else:
-        summaries["financial"] = {"summary": "No financial data available."}
 
-    # 6. Challenges
-    chal_limited = _limit_comments(challenges, 20)
-    if chal_limited:
+    def chal_prompt(data):
         chal_text = "\n".join([
             f"{c['facility']}: Challenges: {c['challenges']} | Mitigations: {c['mitigations']}"
-            for c in chal_limited if c.get('challenges')
+            for c in data if c.get('challenges')
         ])
-        if chal_text:
-            try:
-                prompt = f"""
-You are an expert in HIV programme transition. Based on the following aggregated challenges and mitigations across {len(chal_limited)} facilities, produce a JSON summary with:
+        if not chal_text:
+            return None
+        return f"""
+You are an expert in HIV programme transition. Based on the following aggregated challenges and mitigations across {len(data)} facilities, produce a JSON summary with:
 - "summary": a 2-3 sentence overview.
 - "common_challenges": list of most frequent challenges.
 - "effective_mitigations": list of promising mitigations.
@@ -285,24 +248,13 @@ Data:
 {chal_text}
 Return only valid JSON.
 """
-                resp = call_llm(prompt, max_tokens=300)
-                summaries["challenges"] = _safe_json_loads(resp)
-            except Exception as e:
-                logging.error(f"Challenges summary LLM failed: {e}")
-                summaries["challenges"] = generate_challenges_summary(chal_limited)
-        else:
-            summaries["challenges"] = generate_challenges_summary(chal_limited)
-    else:
-        summaries["challenges"] = {"summary": "No challenges data available."}
 
-    # 7. Plans
-    plan_limited = _limit_comments(plans, 20)
-    if plan_limited:
-        plan_text = "\n".join([f"{p['facility']}: {p['plan']}" for p in plan_limited if p.get('plan')])
-        if plan_text:
-            try:
-                prompt = f"""
-You are an expert in HIV programme transition. Based on the following planned activities across {len(plan_limited)} facilities, produce a JSON summary with:
+    def plan_prompt(data):
+        plan_text = "\n".join([f"{p['facility']}: {p['plan']}" for p in data if p.get('plan')])
+        if not plan_text:
+            return None
+        return f"""
+You are an expert in HIV programme transition. Based on the following planned activities across {len(data)} facilities, produce a JSON summary with:
 - "summary": a 2-3 sentence overview.
 - "common_activities": list of recurring activities.
 - "priority_areas": list of priority areas to focus on.
@@ -311,19 +263,16 @@ Data:
 {plan_text}
 Return only valid JSON.
 """
-                resp = call_llm(prompt, max_tokens=300)
-                summaries["plans"] = _safe_json_loads(resp)
-            except Exception as e:
-                logging.error(f"Plans summary LLM failed: {e}")
-                summaries["plans"] = generate_plans_summary(plan_limited)
-        else:
-            summaries["plans"] = generate_plans_summary(plan_limited)
-    else:
-        summaries["plans"] = {"summary": "No plans data available."}
 
-    # --------------------------------------------------------------
+    # Process all sections
+    summaries["capacity"] = process_section("Capacity", cap_limited, cap_prompt, generate_capacity_summary)
+    summaries["financial"] = process_section("Financial", fin_limited, fin_prompt, generate_financial_summary)
+    summaries["challenges"] = process_section("Challenges", chal_limited, chal_prompt, generate_challenges_summary)
+    summaries["plans"] = process_section("Plans", plan_limited, plan_prompt, generate_plans_summary)
+
+    # ------------------------------------------------------------------
     # Final response
-    # --------------------------------------------------------------
+    # ------------------------------------------------------------------
     return {
         "total_facilities": len(reports),
         "capacity": capacity,
@@ -331,4 +280,5 @@ Return only valid JSON.
         "challenges": challenges,
         "plans": plans,
         "summaries": summaries,
+        "llm_failed": any_llm_failed,
     }

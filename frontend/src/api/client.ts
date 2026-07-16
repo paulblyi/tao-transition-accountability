@@ -21,14 +21,8 @@ export const getProvinces = () =>
 export const getDistricts = (province?: string) => 
   api.get('/filters/districts', { params: { province } });
 
-export const getGovernanceInsights = (filters: any) =>
-  api.get('/categorical/insights', { params: filters });
-
 export const getCategoricalSummary = (filters: any) =>
   api.get('/categorical/summary', { params: filters });
-
-export const getReportSections = (filters: any) =>
-  api.get('/report/sections', { params: filters });
 
 export const getCoverage = (filters: any) =>
   api.get('/coverage/district', { params: filters });
@@ -36,5 +30,11 @@ export const getCoverage = (filters: any) =>
 export const getTransitionRisk = (filters: any) =>
   api.get('/coverage/risk', { params: filters });
 
-export const getRiskNarrative = (filters: any) =>
-  api.get('/coverage/narrative', { params: filters });
+export const getGovernanceInsights = (filters: any, skip_llm: boolean = false) =>
+  api.get('/categorical/insights', { params: { ...filters, skip_llm } });
+
+export const getReportSections = (filters: any, skip_llm: boolean = false) =>
+  api.get('/report/sections', { params: { ...filters, skip_llm } });
+
+export const getRiskNarrative = (filters: any, skip_llm: boolean = false) =>
+  api.get('/coverage/narrative', { params: { ...filters, skip_llm } });

@@ -32,6 +32,7 @@ const Dashboard: React.FC = () => {
   const [aggregatedInsights, setAggregatedInsights] = useState<AggregatedInsight | undefined>(undefined);
   const [tableData, setTableData] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [useAI, setUseAI] = useState(false);
 
   const handleFilterChange = (newFilters: FiltersType) => {
     setFilters(newFilters);
@@ -130,12 +131,12 @@ const Dashboard: React.FC = () => {
 
         {/* Row 3: Governance Insights */}
         <Grid item xs={12}>
-          <GovernanceInsights filters={appliedFilters} />
+          <GovernanceInsights filters={appliedFilters} enabled={useAI} />
         </Grid>
 
         {/* Row 4: Transition Dashboard */}
         <Grid item xs={12}>
-          <TransitionDashboard filters={appliedFilters} />
+          <TransitionDashboard filters={appliedFilters} enabled={useAI} />
         </Grid>
 
         {/* Rows 5-7: Left column (1/3) with three charts, Right column (2/3) with Qualitative Insights spanning all three */}
@@ -170,7 +171,7 @@ const Dashboard: React.FC = () => {
 
         {/* Row 8: Report Sections */}
         <Grid item xs={12}>
-          <ReportSections filters={appliedFilters} />
+          <ReportSections filters={appliedFilters} enabled={useAI} />
         </Grid>
 
         {/* Row 9: Trend Chart – now sorted by date */}
@@ -198,7 +199,11 @@ const Dashboard: React.FC = () => {
   return (
     <Container maxWidth="xl" sx={{ mt: 4, display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       <Header />
-      <Filters onFilterChange={handleFilterChange} />
+      <Filters
+        onFilterChange={handleFilterChange}
+        useAI={useAI}
+        onToggleAI={setUseAI}
+      />
       <ActiveFilters filters={appliedFilters} />
       <Box sx={{ flex: 1 }}>
         {renderContent()}

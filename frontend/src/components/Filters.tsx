@@ -1,13 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { Paper, Grid, TextField, Button, Select, MenuItem, FormControl, InputLabel } from '@mui/material';
+import {
+  Paper, Grid, TextField, Button, Select, MenuItem,
+  FormControl, InputLabel, Switch, FormControlLabel, Box
+} from '@mui/material';
 import { Filters as FiltersType } from '../types';
 import { getProvinces, getDistricts } from '../api/client';
 
 interface Props {
   onFilterChange: (filters: FiltersType) => void;
+  useAI: boolean;
+  onToggleAI: (value: boolean) => void;
 }
 
-const Filters: React.FC<Props> = ({ onFilterChange }) => {
+const Filters: React.FC<Props> = ({ onFilterChange, useAI, onToggleAI }) => {
   const [provinces, setProvinces] = useState<string[]>([]);
   const [districts, setDistricts] = useState<string[]>([]);
   const [selectedProvince, setSelectedProvince] = useState<string>('all');
@@ -25,7 +30,7 @@ const Filters: React.FC<Props> = ({ onFilterChange }) => {
     } else {
       getDistricts().then(res => setDistricts(res.data));
     }
-    setSelectedDistrict('all'); // reset district when province changes
+    setSelectedDistrict('all');
   }, [selectedProvince]);
 
   const handleApply = () => {
@@ -40,8 +45,8 @@ const Filters: React.FC<Props> = ({ onFilterChange }) => {
   return (
     <Paper sx={{ p: 2, mb: 3 }}>
       <Grid container spacing={2} alignItems="center">
-        <Grid item xs={12} sm={3}>
-          <FormControl fullWidth>
+        <Grid item xs={12} sm={2}>
+          <FormControl fullWidth size="small">
             <InputLabel id="province-label">Province</InputLabel>
             <Select
               labelId="province-label"
@@ -54,8 +59,8 @@ const Filters: React.FC<Props> = ({ onFilterChange }) => {
             </Select>
           </FormControl>
         </Grid>
-        <Grid item xs={12} sm={3}>
-          <FormControl fullWidth>
+        <Grid item xs={12} sm={2}>
+          <FormControl fullWidth size="small">
             <InputLabel id="district-label">District</InputLabel>
             <Select
               labelId="district-label"
@@ -73,6 +78,7 @@ const Filters: React.FC<Props> = ({ onFilterChange }) => {
             fullWidth
             label="Start Date"
             type="date"
+            size="small"
             InputLabelProps={{ shrink: true }}
             value={startDate}
             onChange={(e) => setStartDate(e.target.value)}
@@ -83,15 +89,35 @@ const Filters: React.FC<Props> = ({ onFilterChange }) => {
             fullWidth
             label="End Date"
             type="date"
+            size="small"
             InputLabelProps={{ shrink: true }}
             value={endDate}
             onChange={(e) => setEndDate(e.target.value)}
           />
         </Grid>
-        <Grid item xs={12} sm={2}>
-          <Button fullWidth variant="contained" onClick={handleApply}>
-            Apply Filters
-          </Button>
+
+        {/* AI Toggle + Apply Button */}
+        <Grid item xs={12} sm={4}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={useAI}
+                  onChange={(e) => onToggleAI(e.target.checked)}
+                  color="primary"
+                  size="small"
+                />
+              }
+              label="AI Insights"
+              sx={{ 
+                mr: 1,
+                '& .MuiFormControlLabel-label': { fontSize: '0.875rem', fontWeight: 500 }
+              }}
+            />
+            <Button variant="contained" onClick={handleApply} size="small">
+              Apply
+            </Button>
+          </Box>
         </Grid>
       </Grid>
     </Paper>

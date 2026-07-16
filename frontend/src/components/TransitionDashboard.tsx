@@ -24,12 +24,14 @@ import { getCoverage, getTransitionRisk, getRiskNarrative } from '../api/client'
 
 interface Props {
   filters: any;
+  enabled: boolean;
 }
 
-const TransitionDashboard: React.FC<Props> = ({ filters }) => {
+const TransitionDashboard: React.FC<Props> = ({ filters, enabled }) => {
   const [coverage, setCoverage] = useState<any>(null);
   const [risk, setRisk] = useState<any>(null);
   const [narrative, setNarrative] = useState<string | null>(null);
+  const [narrativeFailed, setNarrativeFailed] = useState<boolean>(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,14 +40,18 @@ const TransitionDashboard: React.FC<Props> = ({ filters }) => {
       setLoading(true);
       setError(null);
       try {
-        const [covRes, riskRes, narrativeRes] = await Promise.all([
+        // Always fetch coverage and risk
+        const [covRes, riskRes] = await Promise.all([
           getCoverage(filters),
           getTransitionRisk(filters),
-          getRiskNarrative(filters),
         ]);
         setCoverage(covRes.data);
         setRisk(riskRes.data);
+
+        // Fetch narrative always – skip_llm = NOT enabled (so if enabled is false, skip LLM)
+        const narrativeRes = await getRiskNarrative(filters, !enabled);
         setNarrative(narrativeRes.data.narrative);
+        setNarrativeFailed(narrativeRes.data.llm_failed || false);
       } catch (err: any) {
         setError(err.message || 'Failed to load transition data');
         console.error('Transition data error:', err);
@@ -54,8 +60,9 @@ const TransitionDashboard: React.FC<Props> = ({ filters }) => {
       }
     };
     fetchData();
-  }, [filters]);
+  }, [filters, enabled]);
 
+  // Loading state
   if (loading) {
     return (
       <Paper sx={{ p: 2 }}>
@@ -67,6 +74,7 @@ const TransitionDashboard: React.FC<Props> = ({ filters }) => {
     );
   }
 
+  // Error state
   if (error) {
     return (
       <Paper sx={{ p: 2 }}>
@@ -76,6 +84,7 @@ const TransitionDashboard: React.FC<Props> = ({ filters }) => {
     );
   }
 
+  // No data state
   if (!coverage || coverage.total_facilities === 0) {
     return (
       <Paper sx={{ p: 2 }}>
@@ -101,6 +110,24 @@ const TransitionDashboard: React.FC<Props> = ({ filters }) => {
   return (
     <Paper sx={{ p: 2 }}>
       <Typography variant="h6" gutterBottom>Transition Dashboard – Accountability & Readiness</Typography>
+
+      {/* AI status chips */}
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+        <Chip
+          label={enabled ? 'AI ON' : 'AI OFF'}
+          size="small"
+          color={enabled ? 'primary' : 'default'}
+          variant="outlined"
+        />
+        {narrativeFailed && enabled && (
+          <Chip
+            label="AI unavailable – using data summary"
+            size="small"
+            color="warning"
+            sx={{ ml: 1 }}
+          />
+        )}
+      </Box>
 
       <Grid container spacing={3}>
         {/* Coverage cards */}
@@ -177,7 +204,7 @@ const TransitionDashboard: React.FC<Props> = ({ filters }) => {
               }}
             >
               <Typography variant="body2" fontStyle="italic">
-                {narrative || 'Loading narrative...'}
+                {narrative || (enabled ? 'Loading narrative...' : 'AI Insights are off. Toggle the switch to generate a narrative.')}
               </Typography>
             </Paper>
           </Box>

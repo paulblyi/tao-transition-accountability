@@ -13,8 +13,9 @@ import {
 } from '@mui/material';
 import { getGovernanceInsights } from '../api/client';
 
-interface GovernanceInsightsProps {
+interface Props {
   filters: any;
+  enabled: boolean;
 }
 
 interface InsightsData {
@@ -23,9 +24,10 @@ interface InsightsData {
   strengths: string[];
   challenges: string[];
   recommendations: string[];
+  llm_failed?: boolean;
 }
 
-const GovernanceInsights: React.FC<GovernanceInsightsProps> = ({ filters }) => {
+const GovernanceInsights: React.FC<Props> = ({ filters, enabled }) => {
   const [data, setData] = useState<InsightsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -35,17 +37,17 @@ const GovernanceInsights: React.FC<GovernanceInsightsProps> = ({ filters }) => {
       setLoading(true);
       setError(null);
       try {
-        const response = await getGovernanceInsights(filters);
-        const rawData = response.data;
-        // Ensure arrays exist even if missing
-        const safeData: InsightsData = {
-          total_facilities: rawData?.total_facilities || 0,
-          summary: rawData?.summary || 'No summary available.',
-          strengths: Array.isArray(rawData?.strengths) ? rawData.strengths : [],
-          challenges: Array.isArray(rawData?.challenges) ? rawData.challenges : [],
-          recommendations: Array.isArray(rawData?.recommendations) ? rawData.recommendations : [],
-        };
-        setData(safeData);
+        // Always fetch – skip_llm = NOT enabled
+        const response = await getGovernanceInsights(filters, !enabled);
+        const raw = response.data;
+        setData({
+          total_facilities: raw.total_facilities || 0,
+          summary: raw.summary || 'No summary available.',
+          strengths: Array.isArray(raw.strengths) ? raw.strengths : [],
+          challenges: Array.isArray(raw.challenges) ? raw.challenges : [],
+          recommendations: Array.isArray(raw.recommendations) ? raw.recommendations : [],
+          llm_failed: raw.llm_failed || false,
+        });
       } catch (err: any) {
         setError(err.message || 'Failed to load governance insights');
         console.error('Governance insights error:', err);
@@ -54,7 +56,7 @@ const GovernanceInsights: React.FC<GovernanceInsightsProps> = ({ filters }) => {
       }
     };
     fetchData();
-  }, [filters]);
+  }, [filters, enabled]);
 
   if (loading) {
     return (
@@ -87,8 +89,7 @@ const GovernanceInsights: React.FC<GovernanceInsightsProps> = ({ filters }) => {
     );
   }
 
-  // Safely use arrays (already ensured above)
-  const { summary, strengths, challenges, recommendations } = data;
+  const { summary, strengths, challenges, recommendations, llm_failed } = data;
 
   return (
     <Paper sx={{ p: 2 }}>
@@ -96,12 +97,20 @@ const GovernanceInsights: React.FC<GovernanceInsightsProps> = ({ filters }) => {
         <Typography variant="h6" sx={{ flexGrow: 1 }}>
           Governance & Coordination Insights
         </Typography>
-        <Chip 
-          label={`${data.total_facilities} facility${data.total_facilities > 1 ? 's' : ''}`} 
-          size="small" 
-          color="primary" 
+        <Chip
+          label={`${data.total_facilities} facility${data.total_facilities > 1 ? 's' : ''}`}
+          size="small"
+          color="primary"
           variant="outlined"
         />
+        {llm_failed && (
+          <Chip
+            label="AI unavailable – showing data summary"
+            size="small"
+            color="warning"
+            sx={{ ml: 1 }}
+          />
+        )}
       </Box>
 
       <Typography variant="body1" paragraph sx={{ fontStyle: 'italic', bgcolor: '#f5f5f5', p: 2, borderRadius: 1 }}>

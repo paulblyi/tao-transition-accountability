@@ -20,7 +20,8 @@ def _generate_fallback_summary(reports: list) -> dict:
             "summary": "No governance data available.",
             "strengths": [],
             "challenges": [],
-            "recommendations": []
+            "recommendations": [],
+            "llm_failed": False
         }
 
     total = len(reports)
@@ -66,7 +67,8 @@ def _generate_fallback_summary(reports: list) -> dict:
         "summary": summary,
         "strengths": strengths,
         "challenges": challenges,
-        "recommendations": recommendations
+        "recommendations": recommendations,
+        "llm_failed": False   # This is a proper summary
     }
 
 
@@ -174,28 +176,34 @@ def get_governance_insights(
     district: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    skip_llm: bool = False,
     db: Session = Depends(get_db)
 ):
     reports = crud.get_filtered_reports(db, province, district, start_date, end_date)
-    
     if not reports:
         return {
             "total_facilities": 0,
             "summary": "No facilities found for the selected filters.",
             "strengths": [],
             "challenges": [],
-            "recommendations": []
+            "recommendations": [],
+            "llm_failed": False
         }
 
-    # Define the governance indicators
+    # If skip_llm is true, directly return fallback
+    if skip_llm:
+        fallback = _generate_fallback_summary(reports)
+        fallback["total_facilities"] = len(reports)
+        return fallback
+
+    # Otherwise try LLM
     indicators = [
         ("Sustainability Transition Focal Person in place?", "Comments"),
         ("Availability and functionality of Health Centre Committee", "Comments.1"),
         ("Availability of facility sustainability plan?", "Comments.2"),
         ("Was the HCC/Health facility meeting done", "Comments.3")
     ]
-    
-    # Build structured text – limit to 20 comments
+
     comment_blocks = []
     MAX_COMMENTS = 20
     count = 0
@@ -222,19 +230,13 @@ def get_governance_insights(
                 count += 1
                 if count >= MAX_COMMENTS:
                     break
-    
+
     if not comment_blocks:
-        return {
-            "total_facilities": len(reports),
-            "summary": "No governance comments available for the selected filters.",
-            "strengths": [],
-            "challenges": [],
-            "recommendations": []
-        }
+        fallback = _generate_fallback_summary(reports)
+        fallback["total_facilities"] = len(reports)
+        return fallback
 
     combined_text = "\n".join(comment_blocks)
-    
-    # ---- STRICT PROMPT TO PREVENT HALLUCINATION ----
     prompt = f"""
 You are an expert in HIV programme transition and accountability.
 
@@ -263,7 +265,6 @@ Return only valid JSON, no extra text.
 """
     try:
         response_text = call_llm(prompt, max_tokens=500)
-        # Clean up markdown if present
         if "```json" in response_text:
             response_text = response_text.split("```json")[1].split("```")[0].strip()
         elif "```" in response_text:
@@ -274,15 +275,12 @@ Return only valid JSON, no extra text.
             "summary": result.get("summary", ""),
             "strengths": result.get("strengths", []),
             "challenges": result.get("challenges", []),
-            "recommendations": result.get("recommendations", [])
+            "recommendations": result.get("recommendations", []),
+            "llm_failed": False
         }
     except Exception as e:
         logging.error(f"Governance insights LLM failed: {e}")
         fallback = _generate_fallback_summary(reports)
-        return {
-            "total_facilities": len(reports),
-            "summary": fallback["summary"],
-            "strengths": fallback["strengths"],
-            "challenges": fallback["challenges"],
-            "recommendations": fallback["recommendations"]
-        }
+        fallback["total_facilities"] = len(reports)
+        fallback["llm_failed"] = True
+        return fallback

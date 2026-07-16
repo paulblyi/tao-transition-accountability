@@ -186,13 +186,14 @@ def get_risk_narrative(
     district: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    skip_llm: bool = False,
     db: Session = Depends(get_db)
 ):
     reports = crud.get_filtered_reports(db, province, district, start_date, end_date)
     if not reports:
-        return {"narrative": "No data available for the selected filters."}
+        return {"narrative": "No data available for the selected filters.", "llm_failed": False}
 
-    # Reuse the same logic as /risk
+    # Calculate risk and coverage (same logic as /risk and /district)
     facility_names = set(r.facility for r in reports if r.facility)
     facility_map = {}
     for r in reports:
@@ -227,23 +228,27 @@ def get_risk_narrative(
                 score += 1
         if raw.get("Key Challenges"):
             score += 1
-
-        risk_list.append({
-            "facility": f,
-            "risk_level": "High" if score >= 4 else "Medium" if score >= 2 else "Low",
-        })
+        risk_list.append({"facility": f, "risk_level": "High" if score >= 4 else "Medium" if score >= 2 else "Low"})
 
     high = sum(1 for r in risk_list if r["risk_level"] == "High")
     medium = sum(1 for r in risk_list if r["risk_level"] == "Medium")
     low = sum(1 for r in risk_list if r["risk_level"] == "Low")
     total = len(risk_list)
-
-    # Calculate coverage (same as /district endpoint)
     cutoff = datetime.now() - timedelta(days=30)
     recent = sum(1 for r in reports if r.week_ending and r.week_ending >= cutoff)
     total_facilities = len(facility_names)
     coverage_pct = round((recent / total_facilities * 100) if total_facilities > 0 else 0, 1)
 
+    if skip_llm:
+        narrative = (
+            f"Among {total} facilities, {high} are high risk ({round(high/total*100, 1) if total > 0 else 0}%), "
+            f"{medium} medium risk ({round(medium/total*100, 1) if total > 0 else 0}%), "
+            f"{low} low risk ({round(low/total*100, 1) if total > 0 else 0}%). "
+            f"Coverage is {coverage_pct}% ({recent} of {total_facilities} facilities visited in the last 30 days)."
+        )
+        return {"narrative": narrative, "llm_failed": False}
+
+    # Try LLM
     prompt = f"""
 You are an expert in HIV programme transition and accountability.
 Based on the following aggregated risk and coverage data for the selected level, produce a concise narrative (2-4 sentences) that:
@@ -258,19 +263,17 @@ Data:
 - Low risk: {low} ({round(low/total*100, 1) if total > 0 else 0}%)
 - Coverage (visited in last 30 days): {coverage_pct}% ({recent} of {total_facilities} facilities)
 
-The narrative should be actionable and help decision-makers understand where to focus their attention.
 Return only the narrative text, no extra formatting.
 """
     try:
         narrative = call_llm(prompt, max_tokens=300)
+        return {"narrative": narrative, "llm_failed": False}
     except Exception as e:
         logging.error(f"Narrative LLM failed: {e}")
-        narrative = (
+        fallback = (
             f"Among {total} facilities, {high} are high risk ({round(high/total*100, 1) if total > 0 else 0}%), "
             f"{medium} medium risk ({round(medium/total*100, 1) if total > 0 else 0}%), "
             f"{low} low risk ({round(low/total*100, 1) if total > 0 else 0}%). "
-            f"Coverage is {coverage_pct}% ({recent} of {total_facilities} facilities visited in the last 30 days). "
-            "Please review the data and prioritise high-risk facilities and those not visited recently."
+            f"Coverage is {coverage_pct}% ({recent} of {total_facilities} facilities visited in the last 30 days)."
         )
-
-    return {"narrative": narrative}
+        return {"narrative": fallback, "llm_failed": True}
