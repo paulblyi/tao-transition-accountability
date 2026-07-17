@@ -43,9 +43,16 @@ const GovernanceInsights: React.FC<Props> = ({ filters, enabled }) => {
         setData({
           total_facilities: raw.total_facilities || 0,
           summary: raw.summary || 'No summary available.',
-          strengths: Array.isArray(raw.strengths) ? raw.strengths : [],
-          challenges: Array.isArray(raw.challenges) ? raw.challenges : [],
-          recommendations: Array.isArray(raw.recommendations) ? raw.recommendations : [],
+          // Ensure every item is a string (safeguard against objects)
+          strengths: Array.isArray(raw.strengths)
+            ? raw.strengths.map((s: any) => typeof s === 'string' ? s : String(s))
+            : [],
+          challenges: Array.isArray(raw.challenges)
+            ? raw.challenges.map((c: any) => typeof c === 'string' ? c : String(c))
+            : [],
+          recommendations: Array.isArray(raw.recommendations)
+            ? raw.recommendations.map((r: any) => typeof r === 'string' ? r : String(r))
+            : [],
           llm_failed: raw.llm_failed || false,
         });
       } catch (err: any) {

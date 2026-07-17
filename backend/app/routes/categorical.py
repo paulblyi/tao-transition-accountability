@@ -11,6 +11,32 @@ from app.utils import safe_json_loads
 router = APIRouter(prefix="/api/categorical", tags=["categorical"])
 
 # ----------------------------------------------------------------------
+# Helper: Ensure list items are plain strings
+# ----------------------------------------------------------------------
+def _ensure_string_list(data):
+    """Convert any list of mixed types into a list of plain strings."""
+    if not isinstance(data, list):
+        return []
+    result = []
+    for item in data:
+        if isinstance(item, str):
+            result.append(item)
+        elif isinstance(item, dict):
+            # Try common keys: 'text', 'message', 'content', or join all values
+            if 'text' in item:
+                result.append(str(item['text']))
+            elif 'message' in item:
+                result.append(str(item['message']))
+            elif 'content' in item:
+                result.append(str(item['content']))
+            else:
+                # Fallback: join all values
+                result.append(" ".join(str(v) for v in item.values()))
+        else:
+            result.append(str(item))
+    return result
+
+# ----------------------------------------------------------------------
 # Helper: Generate a fallback summary from governance indicator counts
 # ----------------------------------------------------------------------
 def _generate_fallback_summary(reports: list) -> dict:
@@ -65,10 +91,10 @@ def _generate_fallback_summary(reports: list) -> dict:
 
     return {
         "summary": summary,
-        "strengths": strengths,
-        "challenges": challenges,
-        "recommendations": recommendations,
-        "llm_failed": False   # This is a proper summary
+        "strengths": _ensure_string_list(strengths),
+        "challenges": _ensure_string_list(challenges),
+        "recommendations": _ensure_string_list(recommendations),
+        "llm_failed": False
     }
 
 
@@ -168,7 +194,7 @@ def get_categorical_summary(
 
 
 # ----------------------------------------------------------------------
-# 2. LLM‑generated governance insights (with fallback)
+# 2. LLM‑generated governance insights (with fallback and string safety)
 # ----------------------------------------------------------------------
 @router.get("/insights")
 def get_governance_insights(
@@ -196,12 +222,13 @@ def get_governance_insights(
         fallback["total_facilities"] = len(reports)
         return fallback
 
-    # Otherwise try LLM
+    # Otherwise try LLM – include "Key achievements" as an indicator
     indicators = [
         ("Sustainability Transition Focal Person in place?", "Comments"),
         ("Availability and functionality of Health Centre Committee", "Comments.1"),
         ("Availability of facility sustainability plan?", "Comments.2"),
-        ("Was the HCC/Health facility meeting done", "Comments.3")
+        ("Was the HCC/Health facility meeting done", "Comments.3"),
+        ("Key achievements", None),   # <-- ADDED: no separate comment column
     ]
 
     comment_blocks = []
@@ -217,19 +244,31 @@ def get_governance_insights(
         province_name = report.province or "Unknown"
         for indicator, comment_key in indicators:
             value = report.raw_data.get(indicator)
-            comment = report.raw_data.get(comment_key)
-            if value and comment:
+            if not value:
+                continue
+            if comment_key:
+                comment = report.raw_data.get(comment_key)
+                if comment:
+                    comment_blocks.append(
+                        f"Province: {province_name}\n"
+                        f"District: {district_name}\n"
+                        f"Facility: {facility}\n"
+                        f"  Indicator: {indicator}\n"
+                        f"  Response: {value}\n"
+                        f"  Comment: {comment}\n"
+                    )
+                    count += 1
+            else:
+                # For Key achievements, use the value directly
                 comment_blocks.append(
                     f"Province: {province_name}\n"
                     f"District: {district_name}\n"
                     f"Facility: {facility}\n"
-                    f"  Indicator: {indicator}\n"
-                    f"  Response: {value}\n"
-                    f"  Comment: {comment}\n"
+                    f"  Key Achievement: {value}\n"
                 )
                 count += 1
-                if count >= MAX_COMMENTS:
-                    break
+            if count >= MAX_COMMENTS:
+                break
 
     if not comment_blocks:
         fallback = _generate_fallback_summary(reports)
@@ -257,9 +296,9 @@ You are an expert in HIV programme transition and accountability.
 
 Based ONLY on the comments above, produce a JSON output with:
 1. "summary": a concise 2-3 sentence summary. ONLY mention districts/facilities that appear in the comments.
-2. "strengths": list of governance strengths observed (ONLY from the comments).
-3. "challenges": list of governance gaps identified (ONLY from the comments).
-4. "recommendations": actionable steps based on the challenges observed.
+2. "strengths": list of governance strengths observed (ONLY from the comments) – each as a plain string.
+3. "challenges": list of governance gaps identified (ONLY from the comments) – each as a plain string.
+4. "recommendations": actionable steps based on the challenges observed – each as a plain string.
 
 Return only valid JSON, no extra text.
 """
@@ -273,9 +312,9 @@ Return only valid JSON, no extra text.
         return {
             "total_facilities": len(reports),
             "summary": result.get("summary", ""),
-            "strengths": result.get("strengths", []),
-            "challenges": result.get("challenges", []),
-            "recommendations": result.get("recommendations", []),
+            "strengths": _ensure_string_list(result.get("strengths", [])),
+            "challenges": _ensure_string_list(result.get("challenges", [])),
+            "recommendations": _ensure_string_list(result.get("recommendations", [])),
             "llm_failed": False
         }
     except Exception as e:
