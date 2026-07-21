@@ -3,6 +3,7 @@ export interface Filters {
   district?: string;
   start_date?: string;
   end_date?: string;
+  analysis_mode?: string;
 }
 
 export interface AggregatedData {

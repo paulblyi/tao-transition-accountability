@@ -3,7 +3,12 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from app.database import get_db
 from app import crud
-from app.llm_processor import call_llm
+from app.llm_processor import (
+    call_llm,
+    process_comments_sampled,
+    process_comments_keyword,
+    process_comments_chunked
+)
 import json
 import logging
 from app.utils import safe_json_loads
@@ -22,7 +27,6 @@ def _ensure_string_list(data):
         if isinstance(item, str):
             result.append(item)
         elif isinstance(item, dict):
-            # Try common keys: 'text', 'message', 'content', or join all values
             if 'text' in item:
                 result.append(str(item['text']))
             elif 'message' in item:
@@ -30,7 +34,6 @@ def _ensure_string_list(data):
             elif 'content' in item:
                 result.append(str(item['content']))
             else:
-                # Fallback: join all values
                 result.append(" ".join(str(v) for v in item.values()))
         else:
             result.append(str(item))
@@ -97,9 +100,8 @@ def _generate_fallback_summary(reports: list) -> dict:
         "llm_failed": False
     }
 
-
 # ----------------------------------------------------------------------
-# 1. Categorical summary (counts of Yes/No/Unknown)
+# 1. Categorical summary (counts of Yes/No/Unknown) – unchanged
 # ----------------------------------------------------------------------
 @router.get("/summary")
 def get_categorical_summary(
@@ -110,53 +112,24 @@ def get_categorical_summary(
     db: Session = Depends(get_db)
 ):
     reports = crud.get_filtered_reports(db, province, district, start_date, end_date)
-    
-    # Order reports by facility name for deterministic ordering
     reports = sorted(reports, key=lambda r: r.facility or "")
-    
-    # Define the governance indicators (exact column names from Excel)
     indicators = [
-        {
-            "key": "Sustainability Transition Focal Person in place?",
-            "label": "Sustainability Transition Focal Person",
-            "comment_key": "Comments",
-            "field": "sust_focal_person"
-        },
-        {
-            "key": "Availability and functionality of Health Centre Committee",
-            "label": "Health Centre Committee Functionality",
-            "comment_key": "Comments.1",
-            "field": "hcc_functionality"
-        },
-        {
-            "key": "Availability of facility sustainability plan?",
-            "label": "Facility Sustainability Plan",
-            "comment_key": "Comments.2",
-            "field": "sust_plan_available"
-        },
-        {
-            "key": "Was the HCC/Health facility meeting done",
-            "label": "HCC/Health Facility Meeting",
-            "comment_key": "Comments.3",
-            "field": "hcc_meeting_done"
-        }
+        {"key": "Sustainability Transition Focal Person in place?", "label": "Sustainability Transition Focal Person", "comment_key": "Comments", "field": "sust_focal_person"},
+        {"key": "Availability and functionality of Health Centre Committee", "label": "Health Centre Committee Functionality", "comment_key": "Comments.1", "field": "hcc_functionality"},
+        {"key": "Availability of facility sustainability plan?", "label": "Facility Sustainability Plan", "comment_key": "Comments.2", "field": "sust_plan_available"},
+        {"key": "Was the HCC/Health facility meeting done", "label": "HCC/Health Facility Meeting", "comment_key": "Comments.3", "field": "hcc_meeting_done"}
     ]
 
     results = []
     for indicator in indicators:
-        yes_count = 0
-        no_count = 0
-        unknown_count = 0
+        yes_count = no_count = unknown_count = 0
         sample_comments = []
         all_comments = []
 
         for report in reports:
             if not report.raw_data:
                 continue
-            
-            # Get the value from raw_data using the key
             value = report.raw_data.get(indicator["key"])
-            # Normalize value
             if value is not None:
                 value_str = str(value).strip().lower()
                 if value_str in ['yes', 'true', '1']:
@@ -167,15 +140,13 @@ def get_categorical_summary(
                     unknown_count += 1
             else:
                 unknown_count += 1
-            
-            # Collect comment
+
             comment = report.raw_data.get(indicator["comment_key"])
             if comment:
                 all_comments.append({
                     "facility": report.facility,
                     "comment": str(comment)[:150] + "..." if len(str(comment)) > 150 else str(comment)
                 })
-                # Keep only first 5 for preview
                 if len(sample_comments) < 5:
                     sample_comments.append(all_comments[-1])
 
@@ -192,9 +163,8 @@ def get_categorical_summary(
         })
     return results
 
-
 # ----------------------------------------------------------------------
-# 2. LLM‑generated governance insights (with fallback and string safety)
+# 2. Governance insights – with analysis_mode support
 # ----------------------------------------------------------------------
 @router.get("/insights")
 def get_governance_insights(
@@ -203,6 +173,7 @@ def get_governance_insights(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     skip_llm: bool = False,
+    analysis_mode: str = "sample",  # "fallback", "sample", "keyword", "chunked"
     db: Session = Depends(get_db)
 ):
     reports = crud.get_filtered_reports(db, province, district, start_date, end_date)
@@ -216,26 +187,26 @@ def get_governance_insights(
             "llm_failed": False
         }
 
-    # If skip_llm is true, directly return fallback
-    if skip_llm:
+    # If skip_llm is true, or analysis_mode is "fallback"
+    if skip_llm or analysis_mode == "fallback":
         fallback = _generate_fallback_summary(reports)
         fallback["total_facilities"] = len(reports)
         return fallback
 
-    # Otherwise try LLM – include "Key achievements" as an indicator
+    # Build comment blocks from governance indicators + Key achievements
     indicators = [
         ("Sustainability Transition Focal Person in place?", "Comments"),
         ("Availability and functionality of Health Centre Committee", "Comments.1"),
         ("Availability of facility sustainability plan?", "Comments.2"),
         ("Was the HCC/Health facility meeting done", "Comments.3"),
-        ("Key achievements", None),   # <-- ADDED: no separate comment column
+        ("Key achievements", None),
     ]
 
     comment_blocks = []
     MAX_COMMENTS = 20
     count = 0
     for report in reports:
-        if count >= MAX_COMMENTS:
+        if count >= MAX_COMMENTS and analysis_mode != "chunked":
             break
         if not report.raw_data:
             continue
@@ -259,7 +230,6 @@ def get_governance_insights(
                     )
                     count += 1
             else:
-                # For Key achievements, use the value directly
                 comment_blocks.append(
                     f"Province: {province_name}\n"
                     f"District: {district_name}\n"
@@ -267,7 +237,7 @@ def get_governance_insights(
                     f"  Key Achievement: {value}\n"
                 )
                 count += 1
-            if count >= MAX_COMMENTS:
+            if count >= MAX_COMMENTS and analysis_mode != "chunked":
                 break
 
     if not comment_blocks:
@@ -275,51 +245,20 @@ def get_governance_insights(
         fallback["total_facilities"] = len(reports)
         return fallback
 
-    combined_text = "\n".join(comment_blocks)
-    prompt = f"""
-You are an expert in HIV programme transition and accountability.
+    # Choose processing mode
+    if analysis_mode == "chunked":
+        result = process_comments_chunked(comment_blocks)
+    elif analysis_mode == "keyword":
+        result = process_comments_keyword(comment_blocks)
+    else:  # "sample" (default)
+        result = process_comments_sampled(comment_blocks, max_comments=15)
 
-**IMPORTANT RULES – YOU MUST FOLLOW THEM EXACTLY:**
-1. ONLY mention districts and facilities that are EXPLICITLY listed in the comments below.
-2. DO NOT invent or assume any district or facility names that are not in the comments.
-3. The hierarchy is: Province -> District -> Facility.
-4. If you are not sure about a name, DO NOT mention it.
-5. The selected province is: {province or "All provinces"}.
-6. The selected district is: {district or "All districts"}.
-
-**Context**:
-- {len(reports)} facilities are being assessed for transition readiness.
-- Each facility should have a Sustainability Transition Focal Person, a functional HCC, a sustainability plan, and regular HCC meetings.
-
-**Comments**:
-{combined_text}
-
-Based ONLY on the comments above, produce a JSON output with:
-1. "summary": a concise 2-3 sentence summary. ONLY mention districts/facilities that appear in the comments.
-2. "strengths": list of governance strengths observed (ONLY from the comments) – each as a plain string.
-3. "challenges": list of governance gaps identified (ONLY from the comments) – each as a plain string.
-4. "recommendations": actionable steps based on the challenges observed – each as a plain string.
-
-Return only valid JSON, no extra text.
-"""
-    try:
-        response_text = call_llm(prompt, max_tokens=500)
-        if "```json" in response_text:
-            response_text = response_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in response_text:
-            response_text = response_text.split("```")[1].split("```")[0].strip()
-        result = safe_json_loads(response_text)
-        return {
-            "total_facilities": len(reports),
-            "summary": result.get("summary", ""),
-            "strengths": _ensure_string_list(result.get("strengths", [])),
-            "challenges": _ensure_string_list(result.get("challenges", [])),
-            "recommendations": _ensure_string_list(result.get("recommendations", [])),
-            "llm_failed": False
-        }
-    except Exception as e:
-        logging.error(f"Governance insights LLM failed: {e}")
-        fallback = _generate_fallback_summary(reports)
-        fallback["total_facilities"] = len(reports)
-        fallback["llm_failed"] = True
-        return fallback
+    # Ensure strings and map mitigations to recommendations
+    return {
+        "total_facilities": len(reports),
+        "summary": result.get("summary", ""),
+        "strengths": _ensure_string_list(result.get("strengths", [])),
+        "challenges": _ensure_string_list(result.get("challenges", [])),
+        "recommendations": _ensure_string_list(result.get("mitigations", [])),  # map to recommendations
+        "llm_failed": False
+    }

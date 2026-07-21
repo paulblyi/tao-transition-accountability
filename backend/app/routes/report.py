@@ -3,7 +3,12 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from app.database import get_db
 from app import crud
-from app.llm_processor import call_llm
+from app.llm_processor import (
+    call_llm,
+    process_comments_sampled,
+    process_comments_keyword,
+    process_comments_chunked
+)
 from app.utils import safe_json_loads
 import json
 import logging
@@ -75,7 +80,64 @@ def generate_plans_summary(data: list) -> dict:
     return {"summary": summary, "llm_failed": False}
 
 # ----------------------------------------------------------------------
-# Main endpoint
+# Helper to build comment blocks for a section
+# ----------------------------------------------------------------------
+def _build_comment_blocks(data, section_name: str) -> list:
+    blocks = []
+    for item in data:
+        if not isinstance(item, dict) or not item.get('facility'):
+            continue
+        facility = item['facility']
+        if section_name == "challenges":
+            if item.get('challenges'):
+                blocks.append(
+                    f"Facility: {facility}\n"
+                    f"Challenges: {item['challenges']}\n"
+                    f"Mitigations: {item.get('mitigations', '')}"
+                )
+        else:
+            lines = []
+            for k, v in item.items():
+                if k == 'facility' or not v:
+                    continue
+                lines.append(f"{k}: {v}")
+            if lines:
+                blocks.append(f"Facility: {facility}\n" + "\n".join(lines))
+    return blocks
+
+# ----------------------------------------------------------------------
+# Helper: process a section with chosen analysis mode
+# ----------------------------------------------------------------------
+def _process_section_with_mode(data: list, blocks: list, fallback_func, analysis_mode: str):
+    """
+    Process a section using the chosen analysis mode.
+    data: the original data list (e.g., cap_limited)
+    blocks: the comment blocks built from data
+    fallback_func: the rule-based summary function
+    analysis_mode: "fallback", "sample", "keyword", "chunked"
+    """
+    if not data:
+        return fallback_func([])
+    
+    if analysis_mode == "fallback":
+        # Use the actual data to generate the rule-based summary
+        return fallback_func(data)
+    
+    if not blocks:
+        return fallback_func(data)  # fallback if no blocks available
+    
+    if analysis_mode == "chunked":
+        result = process_comments_chunked(blocks)
+    elif analysis_mode == "keyword":
+        result = process_comments_keyword(blocks)
+    else:  # "sample"
+        result = process_comments_sampled(blocks, max_comments=15)
+    
+    # Ensure we return a dict with at least summary
+    return result
+
+# ----------------------------------------------------------------------
+# Main endpoint – sections 4-7
 # ----------------------------------------------------------------------
 @router.get("/sections")
 def get_report_sections(
@@ -84,77 +146,56 @@ def get_report_sections(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     skip_llm: bool = False,
+    analysis_mode: str = "sample",
     db: Session = Depends(get_db)
 ):
     reports = crud.get_filtered_reports(db, province, district, start_date, end_date)
     if not reports:
         return {"error": "No data found for the selected filters."}
 
-    # ------------------------------------------------------------------
-    # 4. Capacity Building and Workforce Transition
-    # ------------------------------------------------------------------
-    capacity = []
+    # Build data lists (unchanged)
+    capacity, financial, challenges, plans = [], [], [], []
     for r in reports:
-        if r.raw_data:
-            capacity.append({
-                "facility": r.facility,
-                "gaps_supported": r.raw_data.get("Nurses with capacity gaps supported through mentorship"),
-                "nurse_testers": r.raw_data.get("Number of MOHCC nurse testers"),
-                "viac_trained": r.raw_data.get("MOHCC nurses trained in cervical cancer services"),
-                "vl_mentored": r.raw_data.get("MOHCC nurses mentored on VL cascade"),
-                "ahd_supported": r.raw_data.get("MOHCC nurses supported with AHD skills"),
-                "logistics_supported": r.raw_data.get("MOHCC nurses supported with logistics skills"),
-                "oi_zhi": r.raw_data.get("MOHCC nurses working in OI clinic with ZHI support"),
-                "oi_focal": r.raw_data.get("MOHCC OIC focal person at facility?"),
-                "vhw_mentored": r.raw_data.get("Community cadres/VHWs mentored in defaulter tracking"),
-                "defaulter_tracked": r.raw_data.get("Number of defaulters tracked by VHCW (N)"),
-                "defaulter_pct": r.raw_data.get("vhcw_defaulters_tracked_percentage"),
-                "disruptions": r.raw_data.get("Did the site report any service delivery disruptions"),
-                "support_gaps": r.raw_data.get("Who supported to address gaps?"),
-            })
-
-    # ------------------------------------------------------------------
-    # 5. Financial Sustainability
-    # ------------------------------------------------------------------
-    financial = []
-    for r in reports:
-        if r.raw_data:
-            financial.append({
-                "facility": r.facility,
-                "histology": r.raw_data.get("Histology Coupons"),
-                "histology_comment": r.raw_data.get("Histology Coupons - Comments"),
-                "airtime": r.raw_data.get("Facility Airtime"),
-                "airtime_comment": r.raw_data.get("Facility Airtime - Comments"),
-                "fuel": r.raw_data.get("Fuel for outreach/programme activities"),
-                "fuel_comment": r.raw_data.get("Fuel for outreach/programme activities - Comments"),
-                "stationery": r.raw_data.get("Provision of stationery to VHCWs"),
-                "stationery_comment": r.raw_data.get("Provision of stationery to VHCWs - Comments"),
-                "cats_stipends": r.raw_data.get("Provision of stipends for CATS by NAC"),
-                "cats_comment": r.raw_data.get("Provision of stipends for CATS by NAC - Comments"),
-            })
-
-    # ------------------------------------------------------------------
-    # 6. Challenges & Mitigations
-    # ------------------------------------------------------------------
-    challenges = []
-    for r in reports:
-        if r.raw_data:
-            challenges.append({
-                "facility": r.facility,
-                "challenges": r.raw_data.get("Key Challenges"),
-                "mitigations": r.raw_data.get("Mitigation Strategies"),
-            })
-
-    # ------------------------------------------------------------------
-    # 7. Plan for Next Week
-    # ------------------------------------------------------------------
-    plans = []
-    for r in reports:
-        if r.raw_data:
-            plans.append({
-                "facility": r.facility,
-                "plan": r.raw_data.get("Facility planned activities for next week"),
-            })
+        if not r.raw_data:
+            continue
+        capacity.append({
+            "facility": r.facility,
+            "gaps_supported": r.raw_data.get("Nurses with capacity gaps supported through mentorship"),
+            "nurse_testers": r.raw_data.get("Number of MOHCC nurse testers"),
+            "viac_trained": r.raw_data.get("MOHCC nurses trained in cervical cancer services"),
+            "vl_mentored": r.raw_data.get("MOHCC nurses mentored on VL cascade"),
+            "ahd_supported": r.raw_data.get("MOHCC nurses supported with AHD skills"),
+            "logistics_supported": r.raw_data.get("MOHCC nurses supported with logistics skills"),
+            "oi_zhi": r.raw_data.get("MOHCC nurses working in OI clinic with ZHI support"),
+            "oi_focal": r.raw_data.get("MOHCC OIC focal person at facility?"),
+            "vhw_mentored": r.raw_data.get("Community cadres/VHWs mentored in defaulter tracking"),
+            "defaulter_tracked": r.raw_data.get("Number of defaulters tracked by VHCW (N)"),
+            "defaulter_pct": r.raw_data.get("vhcw_defaulters_tracked_percentage"),
+            "disruptions": r.raw_data.get("Did the site report any service delivery disruptions"),
+            "support_gaps": r.raw_data.get("Who supported to address gaps?"),
+        })
+        financial.append({
+            "facility": r.facility,
+            "histology": r.raw_data.get("Histology Coupons"),
+            "histology_comment": r.raw_data.get("Histology Coupons - Comments"),
+            "airtime": r.raw_data.get("Facility Airtime"),
+            "airtime_comment": r.raw_data.get("Facility Airtime - Comments"),
+            "fuel": r.raw_data.get("Fuel for outreach/programme activities"),
+            "fuel_comment": r.raw_data.get("Fuel for outreach/programme activities - Comments"),
+            "stationery": r.raw_data.get("Provision of stationery to VHCWs"),
+            "stationery_comment": r.raw_data.get("Provision of stationery to VHCWs - Comments"),
+            "cats_stipends": r.raw_data.get("Provision of stipends for CATS by NAC"),
+            "cats_comment": r.raw_data.get("Provision of stipends for CATS by NAC - Comments"),
+        })
+        challenges.append({
+            "facility": r.facility,
+            "challenges": r.raw_data.get("Key Challenges"),
+            "mitigations": r.raw_data.get("Mitigation Strategies"),
+        })
+        plans.append({
+            "facility": r.facility,
+            "plan": r.raw_data.get("Facility planned activities for next week"),
+        })
 
     cap_limited = _limit_comments(capacity, 20)
     fin_limited = _limit_comments(financial, 20)
@@ -164,115 +205,69 @@ def get_report_sections(
     summaries = {}
     any_llm_failed = False
 
-    # ------------------------------------------------------------------
-    # Helper to process each section
-    # ------------------------------------------------------------------
-    def process_section(name, data, prompt_builder, fallback_func):
-        nonlocal any_llm_failed
-        if skip_llm:
-            return fallback_func(data)
-        try:
-            text = prompt_builder(data)
-            if text:
-                resp = call_llm(text, max_tokens=300)
-                result = safe_json_loads(resp)
-                result["llm_failed"] = False
-                return result
-            else:
-                return fallback_func(data)
-        except Exception as e:
-            logging.error(f"{name} summary LLM failed: {e}")
-            any_llm_failed = True
-            fallback = fallback_func(data)
-            fallback["llm_failed"] = True
-            return fallback
+    # If skip_llm is true, use rule-based summaries directly
+    if skip_llm:
+        summaries["capacity"] = generate_capacity_summary(cap_limited)
+        summaries["financial"] = generate_financial_summary(fin_limited)
+        summaries["challenges"] = generate_challenges_summary(chal_limited)
+        summaries["plans"] = generate_plans_summary(plan_limited)
+        return {
+            "total_facilities": len(reports),
+            "capacity": capacity,
+            "financial": financial,
+            "challenges": challenges,
+            "plans": plans,
+            "summaries": summaries,
+            "llm_failed": False
+        }
 
-    # Build prompts for each section
-    def cap_prompt(data):
-        cap_text = "\n".join([
-            f"{c['facility']}: gaps_supported={c['gaps_supported']}, nurse_testers={c['nurse_testers']}, "
-            f"viac_trained={c['viac_trained']}, vl_mentored={c['vl_mentored']}, ahd_supported={c['ahd_supported']}, "
-            f"logistics_supported={c['logistics_supported']}, oi_focal={c['oi_focal']}, vhw_mentored={c['vhw_mentored']}, "
-            f"defaulter_pct={c['defaulter_pct']}, disruptions={c['disruptions']}"
-            for c in data if c.get('gaps_supported') is not None
-        ])
-        if not cap_text:
-            return None
-        return f"""
-You are an expert in HIV programme transition. Based on the following aggregated capacity-building data across {len(data)} facilities, produce a JSON summary with:
-- "summary": a 2-3 sentence overview.
-- "strengths": list of positive findings.
-- "gaps": list of areas needing improvement.
-- "recommendations": actionable steps.
+    # Build comment blocks for each section
+    cap_blocks = _build_comment_blocks(cap_limited, "capacity")
+    fin_blocks = _build_comment_blocks(fin_limited, "financial")
+    chal_blocks = _build_comment_blocks(chal_limited, "challenges")
+    plan_blocks = _build_comment_blocks(plan_limited, "plans")
 
-Data:
-{cap_text}
-Return only valid JSON.
-"""
+    # Process each section with the chosen analysis_mode
+    try:
+        summaries["capacity"] = _process_section_with_mode(
+            cap_limited, cap_blocks, generate_capacity_summary, analysis_mode
+        )
+    except Exception as e:
+        logging.error(f"Capacity section failed: {e}")
+        summaries["capacity"] = generate_capacity_summary(cap_limited)
+        summaries["capacity"]["llm_failed"] = True
+        any_llm_failed = True
 
-    def fin_prompt(data):
-        fin_text = "\n".join([
-            f"{f['facility']}: histology={f['histology']}, airtime={f['airtime']}, fuel={f['fuel']}, "
-            f"stationery={f['stationery']}, cats={f['cats_stipends']}"
-            for f in data if f.get('histology') is not None
-        ])
-        if not fin_text:
-            return None
-        return f"""
-You are an expert in HIV programme transition. Based on the following aggregated financial sustainability data across {len(data)} facilities, produce a JSON summary with:
-- "summary": a 2-3 sentence overview.
-- "strengths": list of positive findings.
-- "gaps": list of areas needing improvement.
-- "recommendations": actionable steps.
+    try:
+        summaries["financial"] = _process_section_with_mode(
+            fin_limited, fin_blocks, generate_financial_summary, analysis_mode
+        )
+    except Exception as e:
+        logging.error(f"Financial section failed: {e}")
+        summaries["financial"] = generate_financial_summary(fin_limited)
+        summaries["financial"]["llm_failed"] = True
+        any_llm_failed = True
 
-Data:
-{fin_text}
-Return only valid JSON.
-"""
+    try:
+        summaries["challenges"] = _process_section_with_mode(
+            chal_limited, chal_blocks, generate_challenges_summary, analysis_mode
+        )
+    except Exception as e:
+        logging.error(f"Challenges section failed: {e}")
+        summaries["challenges"] = generate_challenges_summary(chal_limited)
+        summaries["challenges"]["llm_failed"] = True
+        any_llm_failed = True
 
-    def chal_prompt(data):
-        chal_text = "\n".join([
-            f"{c['facility']}: Challenges: {c['challenges']} | Mitigations: {c['mitigations']}"
-            for c in data if c.get('challenges')
-        ])
-        if not chal_text:
-            return None
-        return f"""
-You are an expert in HIV programme transition. Based on the following aggregated challenges and mitigations across {len(data)} facilities, produce a JSON summary with:
-- "summary": a 2-3 sentence overview.
-- "common_challenges": list of most frequent challenges.
-- "effective_mitigations": list of promising mitigations.
-- "recommendations": additional actions.
+    try:
+        summaries["plans"] = _process_section_with_mode(
+            plan_limited, plan_blocks, generate_plans_summary, analysis_mode
+        )
+    except Exception as e:
+        logging.error(f"Plans section failed: {e}")
+        summaries["plans"] = generate_plans_summary(plan_limited)
+        summaries["plans"]["llm_failed"] = True
+        any_llm_failed = True
 
-Data:
-{chal_text}
-Return only valid JSON.
-"""
-
-    def plan_prompt(data):
-        plan_text = "\n".join([f"{p['facility']}: {p['plan']}" for p in data if p.get('plan')])
-        if not plan_text:
-            return None
-        return f"""
-You are an expert in HIV programme transition. Based on the following planned activities across {len(data)} facilities, produce a JSON summary with:
-- "summary": a 2-3 sentence overview.
-- "common_activities": list of recurring activities.
-- "priority_areas": list of priority areas to focus on.
-
-Data:
-{plan_text}
-Return only valid JSON.
-"""
-
-    # Process all sections
-    summaries["capacity"] = process_section("Capacity", cap_limited, cap_prompt, generate_capacity_summary)
-    summaries["financial"] = process_section("Financial", fin_limited, fin_prompt, generate_financial_summary)
-    summaries["challenges"] = process_section("Challenges", chal_limited, chal_prompt, generate_challenges_summary)
-    summaries["plans"] = process_section("Plans", plan_limited, plan_prompt, generate_plans_summary)
-
-    # ------------------------------------------------------------------
-    # Final response
-    # ------------------------------------------------------------------
     return {
         "total_facilities": len(reports),
         "capacity": capacity,
