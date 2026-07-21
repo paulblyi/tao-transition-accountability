@@ -190,7 +190,7 @@ const Dashboard: React.FC = () => {
 
         {/* Row 10: Data Table */}
         <Grid item xs={12}>
-          <DataTable data={tableData.slice(0, 20)} title="Facility Data (Top 20)" />
+          <DataTable data={tableData.slice(0, 20)} title="Facility Data" />
         </Grid>
       </Grid>
     );
